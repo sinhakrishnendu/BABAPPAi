@@ -1,0 +1,106 @@
+{
+  "software_name": "BABAPPAi",
+  "software_version": "2.0.0",
+  "command": "babappai robustness taxon_subsample OG0001",
+  "timestamp": "2026-03-25T04:34:24.943433+00:00",
+  "model": {
+    "file_name": "babappaomega.pt",
+    "doi": "10.5281/zenodo.18195869",
+    "sha256": "657a662563af31304abcb208fc903d2770a9184632a9bab2095db4c538fed8eb",
+    "cached_path": "/Users/krishnendu/Library/Caches/babappai/babappaomega.pt",
+    "verified": true,
+    "compatibility_note": "BABAPPAi is the renamed continuation of the BABAPPA\u03a9 codebase. The cached frozen model is a legacy BABAPPA\u03a9 asset used for backward-compatible inference until BABAPPAi-specific weights are released."
+  },
+  "input": {
+    "alignment_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/alignment.fasta",
+    "tree_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/tree.nwk",
+    "n_sequences": 3,
+    "alignment_length": 6
+  },
+  "calibration": {
+    "enabled": true,
+    "n_calibration": 20,
+    "source": "tree_conditional_monte_carlo",
+    "neutral_generator": null
+  },
+  "gene_summary": {
+    "observed_variance": 1.273882508277893,
+    "neutral_expected_variance": 1.0231287688016892,
+    "dispersion_ratio": 1.245085220084166,
+    "EII_z": 0.6694654860862393,
+    "EII_01": 0.6613834622654045,
+    "identifiable_bool": false,
+    "identifiability_extent": "weak_or_ambiguous"
+  },
+  "branch_results": [
+    {
+      "branch": "taxonA",
+      "background_score": 0.09794111549854279,
+      "logit_mean": -2.220313310623169,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonB",
+      "background_score": 0.10566294193267822,
+      "logit_mean": -2.1358284950256348,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonC",
+      "background_score": 0.09732086211442947,
+      "logit_mean": -2.227353811264038,
+      "is_terminal": true,
+      "selected_foreground": true
+    }
+  ],
+  "site_results": [
+    {
+      "site": 1,
+      "site_score": 0.9998673796653748,
+      "site_logit_mean": 8.93826961517334,
+      "site_logit_var": 0.021774830296635628
+    },
+    {
+      "site": 2,
+      "site_score": 0.9999556541442871,
+      "site_logit_mean": 10.035218238830566,
+      "site_logit_var": 0.021775096654891968
+    },
+    {
+      "site": 3,
+      "site_score": 0.999983549118042,
+      "site_logit_mean": 11.027824401855469,
+      "site_logit_var": 0.021774964407086372
+    },
+    {
+      "site": 4,
+      "site_score": 0.9999879002571106,
+      "site_logit_mean": 11.758227348327637,
+      "site_logit_var": 1.241175889968872
+    },
+    {
+      "site": 5,
+      "site_score": 0.9999673962593079,
+      "site_logit_mean": 10.765620231628418,
+      "site_logit_var": 1.2411755323410034
+    },
+    {
+      "site": 6,
+      "site_score": 0.9998803734779358,
+      "site_logit_mean": 9.042612075805664,
+      "site_logit_var": 0.021774897351861
+    }
+  ],
+  "warnings": [
+    "Diagnostic identifiability score, not evidence of adaptive substitution."
+  ],
+  "outputs": {
+    "results_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/run/results.json",
+    "branch_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/run/branch_summary.tsv",
+    "site_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/run/site_summary.tsv",
+    "interpretation_txt": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/run/interpretation.txt",
+    "run_metadata_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0001/robustness_taxon_subsample/run/run_metadata.json"
+  }
+}

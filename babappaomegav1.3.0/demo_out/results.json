@@ -1,0 +1,126 @@
+{
+  "software_name": "BABAPPAi",
+  "software_version": "1.4.0",
+  "command": "/opt/homebrew/Caskroom/miniconda/base/bin/babappaomega run --alignment demo/aln.fasta --tree demo/tree.nwk --outdir demo_out --overwrite",
+  "timestamp": "2026-03-25T03:48:50.460087+00:00",
+  "model": {
+    "file_name": "babappaomega.pt",
+    "doi": "10.5281/zenodo.18195869",
+    "sha256": "657a662563af31304abcb208fc903d2770a9184632a9bab2095db4c538fed8eb",
+    "cached_path": "/Users/krishnendu/Library/Caches/babappaomega/babappaomega.pt",
+    "verified": true
+  },
+  "input": {
+    "alignment_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/demo/aln.fasta",
+    "tree_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/demo/tree.nwk",
+    "n_sequences": 4,
+    "alignment_length": 6
+  },
+  "calibration": {
+    "enabled": false,
+    "n_calibration": 200,
+    "source": "fallback_uncalibrated"
+  },
+  "gene_summary": {
+    "observed_variance": 1.5923930406570435,
+    "neutral_expected_variance": 1.5923930406570435,
+    "dispersion_ratio": 1.0,
+    "EII_z": 0.0,
+    "EII_01": 0.5,
+    "identifiable_bool": false,
+    "identifiability_extent": "weak_or_ambiguous"
+  },
+  "branch_results": [
+    {
+      "branch": "internal_1",
+      "background_score": 0.17653919756412506,
+      "logit_mean": -1.5399730205535889,
+      "is_terminal": false,
+      "selected_foreground": false
+    },
+    {
+      "branch": "taxonA",
+      "background_score": 0.10566294193267822,
+      "logit_mean": -2.1358284950256348,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonB",
+      "background_score": 0.09794111549854279,
+      "logit_mean": -2.220313310623169,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "internal_2",
+      "background_score": 0.08905249834060669,
+      "logit_mean": -2.325259208679199,
+      "is_terminal": false,
+      "selected_foreground": false
+    },
+    {
+      "branch": "taxonC",
+      "background_score": 0.0901472195982933,
+      "logit_mean": -2.3118386268615723,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonD",
+      "background_score": 0.09856488555669785,
+      "logit_mean": -2.213273048400879,
+      "is_terminal": true,
+      "selected_foreground": true
+    }
+  ],
+  "site_results": [
+    {
+      "site": 1,
+      "site_score": 0.999849796295166,
+      "site_logit_mean": 8.876605033874512,
+      "site_logit_var": 0.1397298127412796
+    },
+    {
+      "site": 2,
+      "site_score": 0.9998993277549744,
+      "site_logit_mean": 9.583077430725098,
+      "site_logit_var": 0.6272611021995544
+    },
+    {
+      "site": 3,
+      "site_score": 0.9999184012413025,
+      "site_logit_mean": 10.441462516784668,
+      "site_logit_var": 1.4866082668304443
+    },
+    {
+      "site": 4,
+      "site_score": 0.887301504611969,
+      "site_logit_mean": 9.378081321716309,
+      "site_logit_var": 21.579763412475586
+    },
+    {
+      "site": 5,
+      "site_score": 0.8008202910423279,
+      "site_logit_mean": 7.304406642913818,
+      "site_logit_var": 32.46306228637695
+    },
+    {
+      "site": 6,
+      "site_score": 0.8425414562225342,
+      "site_logit_mean": 7.357491970062256,
+      "site_logit_var": 21.679391860961914
+    }
+  ],
+  "warnings": [
+    "Diagnostic identifiability score, not evidence of adaptive substitution.",
+    "No neutral reference available for this alignment/tree size; using deterministic fallback calibration (EII_z=0 baseline)."
+  ],
+  "outputs": {
+    "results_json": "demo_out/results.json",
+    "branch_summary_tsv": "demo_out/branch_summary.tsv",
+    "site_summary_tsv": "demo_out/site_summary.tsv",
+    "interpretation_txt": "demo_out/interpretation.txt",
+    "run_metadata_json": "demo_out/run_metadata.json"
+  }
+}

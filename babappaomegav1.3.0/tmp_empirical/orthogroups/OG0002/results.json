@@ -1,0 +1,113 @@
+{
+  "software_name": "BABAPPAi",
+  "software_version": "2.0.0",
+  "command": "babappai validate orthogroups run --input tmp_selection --outdir tmp_empirical",
+  "timestamp": "2026-03-25T04:34:25.065979+00:00",
+  "model": {
+    "file_name": "babappaomega.pt",
+    "doi": "10.5281/zenodo.18195869",
+    "sha256": "657a662563af31304abcb208fc903d2770a9184632a9bab2095db4c538fed8eb",
+    "cached_path": "/Users/krishnendu/Library/Caches/babappai/babappaomega.pt",
+    "verified": true,
+    "compatibility_note": "BABAPPAi is the renamed continuation of the BABAPPA\u03a9 codebase. The cached frozen model is a legacy BABAPPA\u03a9 asset used for backward-compatible inference until BABAPPAi-specific weights are released."
+  },
+  "input": {
+    "alignment_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_ogs/OG0002.fasta",
+    "tree_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/generated_trees/OG0002.nwk",
+    "n_sequences": 4,
+    "alignment_length": 6
+  },
+  "calibration": {
+    "enabled": true,
+    "n_calibration": 20,
+    "source": "tree_conditional_monte_carlo",
+    "neutral_generator": null
+  },
+  "gene_summary": {
+    "observed_variance": 1.3926395177841187,
+    "neutral_expected_variance": 0.950146135687828,
+    "dispersion_ratio": 1.4657108685454598,
+    "EII_z": 1.6863322855246874,
+    "EII_01": 0.8437412105542891,
+    "identifiable_bool": true,
+    "identifiability_extent": "identifiable"
+  },
+  "branch_results": [
+    {
+      "branch": "taxonA",
+      "background_score": 0.10566294193267822,
+      "logit_mean": -2.1358284950256348,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonB",
+      "background_score": 0.0839935839176178,
+      "logit_mean": -2.3892829418182373,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonC",
+      "background_score": 0.0913088470697403,
+      "logit_mean": -2.297757625579834,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxonD",
+      "background_score": 0.09732086211442947,
+      "logit_mean": -2.227353811264038,
+      "is_terminal": true,
+      "selected_foreground": true
+    }
+  ],
+  "site_results": [
+    {
+      "site": 1,
+      "site_score": 0.9998738765716553,
+      "site_logit_mean": 8.990440368652344,
+      "site_logit_var": 0.024496683850884438
+    },
+    {
+      "site": 2,
+      "site_score": 0.9999595880508423,
+      "site_logit_mean": 10.13956069946289,
+      "site_logit_var": 0.04899381846189499
+    },
+    {
+      "site": 3,
+      "site_score": 0.9999866485595703,
+      "site_logit_mean": 11.28868293762207,
+      "site_logit_var": 0.1224844679236412
+    },
+    {
+      "site": 4,
+      "site_score": 0.9999917149543762,
+      "site_logit_mean": 12.384286880493164,
+      "site_logit_var": 1.6657893657684326
+    },
+    {
+      "site": 5,
+      "site_score": 0.9999752044677734,
+      "site_logit_mean": 11.391680717468262,
+      "site_logit_var": 2.00874662399292
+    },
+    {
+      "site": 6,
+      "site_score": 0.9999331831932068,
+      "site_logit_mean": 10.39907455444336,
+      "site_logit_var": 2.0087478160858154
+    }
+  ],
+  "warnings": [
+    "Diagnostic identifiability score, not evidence of adaptive substitution."
+  ],
+  "outputs": {
+    "results_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0002/results.json",
+    "branch_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0002/branch_summary.tsv",
+    "site_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0002/site_summary.tsv",
+    "interpretation_txt": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0002/interpretation.txt",
+    "run_metadata_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_empirical/orthogroups/OG0002/run_metadata.json"
+  }
+}

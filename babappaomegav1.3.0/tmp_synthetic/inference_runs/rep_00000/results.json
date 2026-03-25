@@ -1,0 +1,303 @@
+{
+  "software_name": "BABAPPAi",
+  "software_version": "2.0.0",
+  "command": "babappai validate synthetic run --simulator scripts/simulator.py --outdir tmp_synthetic",
+  "timestamp": "2026-03-25T04:36:09.101376+00:00",
+  "model": {
+    "file_name": "babappaomega.pt",
+    "doi": "10.5281/zenodo.18195869",
+    "sha256": "657a662563af31304abcb208fc903d2770a9184632a9bab2095db4c538fed8eb",
+    "cached_path": "/Users/krishnendu/Library/Caches/babappai/babappaomega.pt",
+    "verified": true,
+    "compatibility_note": "BABAPPAi is the renamed continuation of the BABAPPA\u03a9 codebase. The cached frozen model is a legacy BABAPPA\u03a9 asset used for backward-compatible inference until BABAPPAi-specific weights are released."
+  },
+  "input": {
+    "alignment_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/simulator_runs/rep_00000/alignment.fasta",
+    "tree_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/simulator_runs/rep_00000/tree.nwk",
+    "n_sequences": 8,
+    "alignment_length": 30
+  },
+  "calibration": {
+    "enabled": false,
+    "n_calibration": 20,
+    "source": "fallback_uncalibrated",
+    "neutral_generator": {
+      "generator_path": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/scripts/generate_neutral_calibration.py",
+      "attempted_commands": [
+        [
+          "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/.venv/bin/python",
+          "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/scripts/generate_neutral_calibration.py",
+          "--outdir",
+          "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/neutral_generator",
+          "--seed",
+          "42"
+        ]
+      ],
+      "seed": 42,
+      "output_dir": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/neutral_generator",
+      "reference_file": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/neutral_generator/neutral_reference_frozen.json",
+      "stdout": "[OK] Wrote neutral reference table to /Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/neutral_generator/neutral_reference_frozen.json\n",
+      "stderr": ""
+    }
+  },
+  "gene_summary": {
+    "observed_variance": 0.8220435976982117,
+    "neutral_expected_variance": 0.8220435976982117,
+    "dispersion_ratio": 1.0,
+    "EII_z": 0.0,
+    "EII_01": 0.5,
+    "identifiable_bool": false,
+    "identifiability_extent": "weak_or_ambiguous"
+  },
+  "branch_results": [
+    {
+      "branch": "taxon01",
+      "background_score": 0.08020498603582382,
+      "logit_mean": -2.4395651817321777,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon02",
+      "background_score": 0.08020498603582382,
+      "logit_mean": -2.4395651817321777,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon03",
+      "background_score": 0.07744468003511429,
+      "logit_mean": -2.477583408355713,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon04",
+      "background_score": 0.07876268029212952,
+      "logit_mean": -2.4592783451080322,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon05",
+      "background_score": 0.08020498603582382,
+      "logit_mean": -2.4395651817321777,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon06",
+      "background_score": 0.08020498603582382,
+      "logit_mean": -2.4395651817321777,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon07",
+      "background_score": 0.07876268029212952,
+      "logit_mean": -2.4592783451080322,
+      "is_terminal": true,
+      "selected_foreground": true
+    },
+    {
+      "branch": "taxon08",
+      "background_score": 0.08020498603582382,
+      "logit_mean": -2.4395651817321777,
+      "is_terminal": true,
+      "selected_foreground": true
+    }
+  ],
+  "site_results": [
+    {
+      "site": 1,
+      "site_score": 0.999859094619751,
+      "site_logit_mean": 8.873053550720215,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 2,
+      "site_score": 0.9999479055404663,
+      "site_logit_mean": 9.865659713745117,
+      "site_logit_var": 0.010717430151998997
+    },
+    {
+      "site": 3,
+      "site_score": 0.9999822378158569,
+      "site_logit_mean": 11.13216781616211,
+      "site_logit_var": 0.6859130859375
+    },
+    {
+      "site": 4,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 5,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872993469238,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 6,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872993469238,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 7,
+      "site_score": 0.9999924898147583,
+      "site_logit_mean": 11.81174373626709,
+      "site_logit_var": 0.0
+    },
+    {
+      "site": 8,
+      "site_score": 0.9999924898147583,
+      "site_logit_mean": 11.81174373626709,
+      "site_logit_var": 0.0
+    },
+    {
+      "site": 9,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 10,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 11,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 12,
+      "site_score": 0.9999934434890747,
+      "site_logit_mean": 12.124773025512695,
+      "site_logit_var": 0.6859139800071716
+    },
+    {
+      "site": 13,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717430151998997
+    },
+    {
+      "site": 14,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 15,
+      "site_score": 0.9999932050704956,
+      "site_logit_mean": 11.890000343322754,
+      "site_logit_var": 0.018372736871242523
+    },
+    {
+      "site": 16,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 17,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 18,
+      "site_score": 0.9999934434890747,
+      "site_logit_mean": 12.124773025512695,
+      "site_logit_var": 0.6859139800071716
+    },
+    {
+      "site": 19,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850872039794922,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 20,
+      "site_score": 0.999993085861206,
+      "site_logit_mean": 11.890000343322754,
+      "site_logit_var": 0.018372736871242523
+    },
+    {
+      "site": 21,
+      "site_score": 0.999993085861206,
+      "site_logit_mean": 11.890000343322754,
+      "site_logit_var": 0.018372736871242523
+    },
+    {
+      "site": 22,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850871086120605,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 23,
+      "site_score": 0.9999934434890747,
+      "site_logit_mean": 12.124772071838379,
+      "site_logit_var": 0.6859139800071716
+    },
+    {
+      "site": 24,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850871086120605,
+      "site_logit_var": 0.010717364959418774
+    },
+    {
+      "site": 25,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850871086120605,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 26,
+      "site_score": 0.999992847442627,
+      "site_logit_mean": 11.850871086120605,
+      "site_logit_var": 0.01071749534457922
+    },
+    {
+      "site": 27,
+      "site_score": 0.9999926090240479,
+      "site_logit_mean": 11.811742782592773,
+      "site_logit_var": 0.0
+    },
+    {
+      "site": 28,
+      "site_score": 0.9999799728393555,
+      "site_logit_mean": 10.819138526916504,
+      "site_logit_var": 0.0
+    },
+    {
+      "site": 29,
+      "site_score": 0.9999459981918335,
+      "site_logit_mean": 9.826531410217285,
+      "site_logit_var": 0.0
+    },
+    {
+      "site": 30,
+      "site_score": 0.999854326248169,
+      "site_logit_mean": 8.833925247192383,
+      "site_logit_var": 0.0
+    }
+  ],
+  "warnings": [
+    "Diagnostic identifiability score, not evidence of adaptive substitution.",
+    "No neutral reference available for this alignment/tree size; using deterministic fallback calibration (EII_z=0 baseline)."
+  ],
+  "outputs": {
+    "results_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/inference_runs/rep_00000/results.json",
+    "branch_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/inference_runs/rep_00000/branch_summary.tsv",
+    "site_summary_tsv": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/inference_runs/rep_00000/site_summary.tsv",
+    "interpretation_txt": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/inference_runs/rep_00000/interpretation.txt",
+    "run_metadata_json": "/Users/krishnendu/Desktop/BABAPPAomega/babappaomegav1.3.0/tmp_synthetic/inference_runs/rep_00000/run_metadata.json"
+  }
+}
