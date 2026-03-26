@@ -56,6 +56,13 @@ def run_and_write_outputs(
     foreground_list: Optional[str],
     offline: bool,
     overwrite: bool,
+    sigma_floor: float = 0.0,
+    alpha: float = 0.05,
+    pvalue_mode: str = "empirical_monte_carlo",
+    retain_eii_bands: bool = True,
+    report_threshold_bands: bool = True,
+    min_neutral_group_size: int = 20,
+    neutral_reps: int = 200,
     neutral_generator_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +73,7 @@ def run_and_write_outputs(
         "site_summary_tsv": outdir / "site_summary.tsv",
         "interpretation_txt": outdir / "interpretation.txt",
         "run_metadata_json": outdir / "run_metadata.json",
+        "neutral_calibration_replicates_tsv": outdir / "neutral_calibration_replicates.tsv",
     }
 
     if not overwrite:
@@ -88,10 +96,30 @@ def run_and_write_outputs(
         foreground_mode=foreground_mode,
         foreground_list_path=foreground_list,
         offline=offline,
+        sigma_floor=sigma_floor,
+        alpha=alpha,
+        pvalue_mode=pvalue_mode,
+        neutral_reps=neutral_reps,
+        min_neutral_group_size=min_neutral_group_size,
+        retain_eii_bands=retain_eii_bands,
+        report_threshold_bands=report_threshold_bands,
     )
 
     gene = result["gene_level_identifiability"]
     mstatus = result["model_status"]
+    neutral_reps_values = [
+        float(x)
+        for x in (result.get("neutral_calibration_replicates") or gene.get("neutral_replicates") or [])
+    ]
+
+    _write_tsv(
+        outputs["neutral_calibration_replicates_tsv"],
+        ["replicate_index", "D0_neutral"],
+        [
+            {"replicate_index": idx + 1, "D0_neutral": value}
+            for idx, value in enumerate(neutral_reps_values)
+        ],
+    )
 
     payload = {
         "software_name": SOFTWARE_NAME,
@@ -116,17 +144,17 @@ def run_and_write_outputs(
             "enabled": bool(tree_calibration),
             "n_calibration": int(n_calibration),
             "source": gene.get("calibration_source"),
+            "sigma_floor": float(sigma_floor),
+            "alpha": float(alpha),
+            "pvalue_mode": str(pvalue_mode),
+            "neutral_reps": int(neutral_reps),
+            "min_neutral_group_size": int(min_neutral_group_size),
+            "retain_eii_bands": bool(retain_eii_bands),
+            "report_threshold_bands": bool(report_threshold_bands),
             "neutral_generator": neutral_generator_metadata,
+            "neutral_replicates_tsv": str(outputs["neutral_calibration_replicates_tsv"]),
         },
-        "gene_summary": {
-            "observed_variance": gene.get("observed_variance"),
-            "neutral_expected_variance": gene.get("neutral_expected_variance"),
-            "dispersion_ratio": gene.get("dispersion_ratio"),
-            "EII_z": gene.get("EII_z"),
-            "EII_01": gene.get("EII_01"),
-            "identifiable_bool": gene.get("identifiable_bool"),
-            "identifiability_extent": gene.get("identifiability_extent"),
-        },
+        "gene_summary": {k: v for k, v in gene.items() if k != "neutral_replicates"},
         "branch_results": result["branch_results"],
         "site_results": result["site_results"],
         "warnings": result.get("warnings", []),
@@ -148,6 +176,10 @@ def run_and_write_outputs(
                 "EII_01": payload["gene_summary"]["EII_01"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
+                "p_emp": payload["gene_summary"]["p_emp"],
+                "q_emp": payload["gene_summary"]["q_emp"],
+                "significant_bool": payload["gene_summary"]["significant_bool"],
+                "significance_label": payload["gene_summary"]["significance_label"],
             }
         )
 
@@ -163,6 +195,10 @@ def run_and_write_outputs(
                 "EII_01": payload["gene_summary"]["EII_01"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
+                "p_emp": payload["gene_summary"]["p_emp"],
+                "q_emp": payload["gene_summary"]["q_emp"],
+                "significant_bool": payload["gene_summary"]["significant_bool"],
+                "significance_label": payload["gene_summary"]["significance_label"],
             }
         )
 
@@ -178,6 +214,10 @@ def run_and_write_outputs(
             "EII_01",
             "identifiable_bool",
             "identifiability_extent",
+            "p_emp",
+            "q_emp",
+            "significant_bool",
+            "significance_label",
         ],
         branch_rows,
     )
@@ -193,6 +233,10 @@ def run_and_write_outputs(
             "EII_01",
             "identifiable_bool",
             "identifiability_extent",
+            "p_emp",
+            "q_emp",
+            "significant_bool",
+            "significance_label",
         ],
         site_rows,
     )
@@ -237,12 +281,14 @@ def terminal_summary(payload: Dict[str, Any]) -> list[str]:
     ) or "n/a"
 
     return [
+        f"Empirical p-value (p_emp): {float(gene['p_emp']):.4g}" if gene.get("p_emp") is not None else "Empirical p-value (p_emp): n/a",
+        f"BH q-value (q_emp): {float(gene['q_emp']):.4g}" if gene.get("q_emp") is not None else "BH q-value (q_emp): n/a",
+        f"Significant at alpha={float(gene.get('alpha_used', 0.05)):.2f}: {'YES' if bool(gene.get('significant_bool')) else 'NO'}",
         f"Gene-level EII_z: {float(gene['EII_z']):.2f}",
         f"Gene-level EII_01: {float(gene['EII_01']):.2f}",
-        f"Identifiable: {'YES' if bool(gene['identifiable_bool']) else 'NO'}",
-        f"Extent: {gene['identifiability_extent']}",
+        f"Descriptive EII band: {gene.get('identifiability_extent', 'n/a')}",
         f"Strongest branches: {branch_labels}",
         f"Top elevated sites: {site_labels}",
-        "Warning: diagnostic identifiability score, not evidence of adaptive substitution",
+        "Note: EII bands are descriptive only; significance uses empirical p/q relative to matched neutral calibration.",
+        "Warning: significance does not prove adaptive substitution.",
     ]
-

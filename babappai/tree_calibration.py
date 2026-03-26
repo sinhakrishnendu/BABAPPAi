@@ -5,6 +5,7 @@
 
 import numpy as np
 import tempfile
+from typing import Any, Dict, Optional
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
@@ -22,12 +23,14 @@ def monte_carlo_neutral(
     foreground_mode="all-leaves",
     foreground_list_path=None,
     batch_size=1,
+    inference_extra_kwargs: Optional[Dict[str, Any]] = None,
 ):
     """
     Perform tree-conditional Monte Carlo calibration.
     """
 
     simulated_variances = []
+    shared_kwargs = dict(inference_extra_kwargs or {})
 
     for r in range(N):
 
@@ -46,11 +49,13 @@ def monte_carlo_neutral(
                 tree_obj=tree,
                 model_tag=model_tag,
                 tree_calibration=False,  # avoid recursion
+                pvalue_mode="disabled",
                 offline=offline,
                 seed=r,
                 foreground_mode=foreground_mode,
                 foreground_list_path=foreground_list_path,
                 batch_size=batch_size,
+                **shared_kwargs,
             )
 
         simulated_variances.append(

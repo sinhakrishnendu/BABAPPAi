@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from babappai.calibration.neutral_generator_adapter import run_neutral_generator
 from babappai.run_pipeline import run_and_write_outputs
+from babappai.stats import annotate_bh_qvalues
 from babappai.validation.simulator_adapter import run_simulator
 
 
@@ -70,6 +71,11 @@ def run_synthetic_validation(
     batch_size: int,
     offline: bool,
     overwrite: bool,
+    sigma_floor: float,
+    alpha: float,
+    pvalue_mode: str,
+    min_neutral_group_size: int,
+    neutral_reps: int,
     grid_config: Optional[str] = None,
     replicates_per_cell: int = 2,
     balance_target_per_regime: int = 20,
@@ -128,6 +134,11 @@ def run_synthetic_validation(
                 foreground_list=None,
                 offline=offline,
                 overwrite=overwrite,
+                sigma_floor=sigma_floor,
+                alpha=alpha,
+                pvalue_mode=pvalue_mode,
+                min_neutral_group_size=min_neutral_group_size,
+                neutral_reps=neutral_reps,
                 neutral_generator_metadata=neutral_meta,
             )
             runtime_sec = time.perf_counter() - start
@@ -147,8 +158,22 @@ def run_synthetic_validation(
                     "truth_metadata_json": json.dumps(sim_meta["truth_metadata"], sort_keys=True),
                     "neutral_generator_path": neutral_meta["generator_path"] if neutral_meta else "",
                     "neutral_generator_reference_file": neutral_meta["reference_file"] if neutral_meta else "",
+                    "D_obs": gene.get("D_obs"),
+                    "mu0": gene.get("mu0"),
+                    "sigma0_raw": gene.get("sigma0_raw"),
+                    "sigma0_final": gene.get("sigma0_final"),
+                    "sigma_floor_used": gene.get("sigma_floor_used"),
+                    "fallback_flag": gene.get("fallback_flag"),
+                    "fallback_reason": gene.get("fallback_reason"),
+                    "neutral_group_size": gene.get("neutral_group_size"),
+                    "calibration_group": gene.get("calibration_group"),
                     "EII_z": gene["EII_z"],
                     "EII_01": gene["EII_01"],
+                    "p_emp": gene.get("p_emp"),
+                    "q_emp": gene.get("q_emp"),
+                    "alpha_used": gene.get("alpha_used"),
+                    "significant_bool": gene.get("significant_bool"),
+                    "significance_label": gene.get("significance_label"),
                     "identifiable_bool": gene["identifiable_bool"],
                     "identifiability_extent": regime,
                     "runtime_seconds": runtime_sec,
@@ -171,6 +196,16 @@ def run_synthetic_validation(
         if replicate_index >= max_replicates:
             break
 
+    annotate_bh_qvalues(replicate_rows, p_key="p_emp", q_key="q_emp")
+    for row in replicate_rows:
+        try:
+            qv = float(row.get("q_emp", float("nan")))
+        except (TypeError, ValueError):
+            qv = float("nan")
+        row["alpha_used"] = float(alpha)
+        row["significant_bool"] = bool(qv <= alpha) if qv == qv else False
+        row["significance_label"] = "significant" if row["significant_bool"] else "not_significant"
+
     _write_tsv(out / "synthetic_replicates.tsv", replicate_rows)
     (out / "synthetic_replicates.json").write_text(
         json.dumps(replicate_rows, indent=2) + "\n"
@@ -184,10 +219,11 @@ def run_synthetic_validation(
         "grid": grid,
         "replicates_per_cell": replicates_per_cell,
         "neutral_generator_metadata": neutral_meta,
+        "alpha_used": float(alpha),
+        "pvalue_mode": pvalue_mode,
         "provenance_note": (
             "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase."
         ),
     }
     (out / "synthetic_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
-

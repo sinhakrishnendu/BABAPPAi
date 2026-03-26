@@ -53,6 +53,10 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
                 "id": row.get("orthogroup_id", ""),
                 "EII_z": row.get("EII_z", ""),
                 "EII_01": row.get("EII_01", ""),
+                "p_emp": row.get("p_emp", ""),
+                "q_emp": row.get("q_emp", ""),
+                "significant_bool": row.get("significant_bool", ""),
+                "significance_label": row.get("significance_label", ""),
                 "identifiable_bool": row.get("identifiable_bool", ""),
                 "identifiability_extent": row.get("identifiability_extent", ""),
                 "source_table": str(empirical_tsv) if empirical_tsv else "",
@@ -65,6 +69,10 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
                 "id": row.get("replicate_id", ""),
                 "EII_z": row.get("EII_z", ""),
                 "EII_01": row.get("EII_01", ""),
+                "p_emp": row.get("p_emp", ""),
+                "q_emp": row.get("q_emp", ""),
+                "significant_bool": row.get("significant_bool", ""),
+                "significance_label": row.get("significance_label", ""),
                 "identifiable_bool": row.get("identifiable_bool", ""),
                 "identifiability_extent": row.get("identifiability_extent", ""),
                 "source_table": str(synthetic_tsv) if synthetic_tsv else "",
@@ -78,6 +86,8 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
 
     empirical_counts = Counter(row.get("identifiability_extent", "") for row in empirical_rows)
     synthetic_counts = Counter(row.get("identifiability_extent", "") for row in synthetic_rows)
+    empirical_sig_counts = Counter(row.get("significance_label", "") for row in empirical_rows)
+    synthetic_sig_counts = Counter(row.get("significance_label", "") for row in synthetic_rows)
 
     fig_dir = out / "publication_ready_figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
@@ -122,9 +132,11 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
         "",
         "## 4) Empirical Anopheles validation results",
         f"- Regime counts: {dict(sorted(empirical_counts.items()))}",
+        f"- Significance counts: {dict(sorted(empirical_sig_counts.items()))}",
         "",
         "## 5) Synthetic benchmark design",
         "- Simulator-driven parameter grid with simulate-and-bucket tracking.",
+        f"- Synthetic significance counts: {dict(sorted(synthetic_sig_counts.items()))}",
         "",
         "## 6) Role of neutral calibration generator",
         "- External neutral generator can be run and logged via adapter metadata.",
@@ -140,7 +152,8 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
         "",
         "## 10) Recommended manuscript wording",
         "- \"BABAPPAi is the renamed continuation of the BABAPPAΩ codebase.\"",
-        "- \"Scores are diagnostic identifiability measures, not proof of adaptive substitution.\"",
+        "- \"EII is a recoverability diagnostic; inferential support is based on empirical p/q values under matched neutral calibration.\"",
+        "- \"Significant q-values indicate excess dispersion relative to matched neutral simulation, not proof of adaptive substitution.\"",
         "",
         "## 11) Software citation and legacy asset citation notes",
         "- Cite BABAPPAi software version and explicitly reference legacy model DOI where applicable.",
@@ -156,4 +169,3 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
         "synthetic_regime_counts": dict(sorted(synthetic_counts.items())),
     }
     return metadata
-

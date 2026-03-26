@@ -75,6 +75,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             foreground_list=args.foreground_list,
             offline=args.offline,
             overwrite=args.overwrite,
+            sigma_floor=args.sigma_floor,
+            alpha=args.alpha,
+            pvalue_mode=args.pvalue_mode,
+            retain_eii_bands=args.retain_eii_bands,
+            report_threshold_bands=args.report_threshold_bands,
+            min_neutral_group_size=args.min_neutral_group_size,
+            neutral_reps=args.neutral_reps,
             neutral_generator_metadata=neutral_meta,
         )
     except Exception as exc:
@@ -278,6 +285,11 @@ def cmd_validate_orthogroups_run(args: argparse.Namespace) -> int:
             foreground_list=args.foreground_list,
             offline=args.offline,
             overwrite=args.overwrite,
+            sigma_floor=args.sigma_floor,
+            alpha=args.alpha,
+            pvalue_mode=args.pvalue_mode,
+            min_neutral_group_size=args.min_neutral_group_size,
+            neutral_reps=args.neutral_reps,
             robustness_limit=args.robustness_limit,
         )
     except Exception as exc:
@@ -302,6 +314,11 @@ def cmd_validate_synthetic_run(args: argparse.Namespace) -> int:
             batch_size=args.batch_size,
             offline=args.offline,
             overwrite=args.overwrite,
+            sigma_floor=args.sigma_floor,
+            alpha=args.alpha,
+            pvalue_mode=args.pvalue_mode,
+            min_neutral_group_size=args.min_neutral_group_size,
+            neutral_reps=args.neutral_reps,
             grid_config=args.grid_config,
             replicates_per_cell=args.replicates_per_cell,
             balance_target_per_regime=args.balance_target_per_regime,
@@ -355,6 +372,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--foreground-list", default=None)
     run_parser.add_argument("--neutral-generator", default=None)
+    run_parser.add_argument("--alpha", type=float, default=0.05)
+    run_parser.add_argument(
+        "--pvalue-mode",
+        choices=["empirical_monte_carlo", "frozen_reference"],
+        default="empirical_monte_carlo",
+    )
+    run_parser.add_argument("--neutral-reps", type=int, default=200)
+    run_parser.add_argument("--min-neutral-group-size", type=int, default=20)
+    run_parser.add_argument("--sigma-floor", type=float, default=0.05)
+    run_parser.add_argument("--retain-eii-bands", dest="retain_eii_bands", action="store_true")
+    run_parser.add_argument("--no-retain-eii-bands", dest="retain_eii_bands", action="store_false")
+    run_parser.set_defaults(retain_eii_bands=True)
+    run_parser.add_argument("--report-threshold-bands", dest="report_threshold_bands", action="store_true")
+    run_parser.add_argument("--no-report-threshold-bands", dest="report_threshold_bands", action="store_false")
+    run_parser.set_defaults(report_threshold_bands=True)
     run_parser.add_argument("--offline", action="store_true")
     run_parser.add_argument("--quiet", action="store_true")
     run_parser.add_argument("--overwrite", action="store_true")
@@ -421,6 +453,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="all-leaves",
     )
     og_run.add_argument("--foreground-list", default=None)
+    og_run.add_argument("--alpha", type=float, default=0.05)
+    og_run.add_argument(
+        "--pvalue-mode",
+        choices=["empirical_monte_carlo", "frozen_reference"],
+        default="empirical_monte_carlo",
+    )
+    og_run.add_argument("--neutral-reps", type=int, default=200)
+    og_run.add_argument("--min-neutral-group-size", type=int, default=20)
+    og_run.add_argument("--sigma-floor", type=float, default=0.05)
     og_run.add_argument("--offline", action="store_true")
     og_run.add_argument("--overwrite", action="store_true")
     og_run.add_argument("--robustness-limit", type=int, default=10)
@@ -438,6 +479,15 @@ def build_parser() -> argparse.ArgumentParser:
     syn_run.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     syn_run.add_argument("--batch-size", type=int, default=1)
     syn_run.add_argument("--seed", type=int, default=42)
+    syn_run.add_argument("--alpha", type=float, default=0.05)
+    syn_run.add_argument(
+        "--pvalue-mode",
+        choices=["empirical_monte_carlo", "frozen_reference"],
+        default="empirical_monte_carlo",
+    )
+    syn_run.add_argument("--neutral-reps", type=int, default=200)
+    syn_run.add_argument("--min-neutral-group-size", type=int, default=20)
+    syn_run.add_argument("--sigma-floor", type=float, default=0.05)
     syn_run.add_argument("--offline", action="store_true")
     syn_run.add_argument("--overwrite", action="store_true")
     syn_run.add_argument("--replicates-per-cell", type=int, default=2)

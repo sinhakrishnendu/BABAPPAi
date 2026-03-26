@@ -76,7 +76,7 @@ def test_run_command(monkeypatch, tmp_path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "Gene-level EII_z" in out
-    assert "Identifiable:" in out
+    assert "Significant at alpha=" in out
 
 
 def test_run_broken_input(monkeypatch, tmp_path):

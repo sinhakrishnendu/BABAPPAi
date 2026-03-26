@@ -22,7 +22,7 @@ Assistant Professor, Department of Zoology, Jhargram Raj College, Jhargram 72150
 \maketitle
 
 \begin{abstract}
-Branch--site methods are widely used to infer episodic positive selection from coding-sequence alignments, but their conclusions depend on explicit codon-model assumptions and on whether the available data contain enough information to resolve lineage-restricted signal. Recombination, alignment uncertainty and heterogeneous background constraint can therefore reduce recoverability even when episodic perturbation is biologically present. Here I present BABAPPAi, a likelihood-free diagnostic framework that targets branch--site \emph{identifiability} rather than binary detection. The method combines forward simulation under codon-level mutation--selection dynamics with amortized neural inference trained to recognize branch--site deviations from a neutral or weakly structured background, without gene-wise likelihood fitting or direct estimation of $\omega$. From the inferred branch--site scores, BABAPPAi derives aggregate burden summaries and an Episodic Identifiability Index (EII) that measures whether an alignment contains enough structured variation for episodic interpretation to be statistically meaningful. In held-out synthetic benchmarks, predicted burden increased monotonically with simulated episodic load, remained unstructured under neutrality, and was more stable at the gene level than at individual sites. Performance degraded gradually under recombination-aware segmentation, heterogeneous mutation rates and alignment noise, while deterministic execution and explicit input validation supported robust software behaviour. BABAPPAi is intended as a complement to classical branch--site tests, not a replacement: it diagnoses whether episodic inference is well posed, and at what scale, before strong adaptive claims are made.
+Branch--site methods are widely used to infer episodic positive selection from coding-sequence alignments, but their conclusions depend on codon-model assumptions and on whether available data contain enough information to resolve lineage-restricted signal. Recombination, alignment uncertainty and heterogeneous background constraint can reduce recoverability even when episodic perturbation is biologically present. BABAPPAi is a likelihood-free framework that targets branch--site \emph{recoverability/identifiability} rather than direct adaptation testing. The method combines forward simulation under codon-level mutation--selection dynamics with amortized neural inference trained to recognize branch--site deviations from matched neutral background structure, without gene-wise likelihood fitting or direct estimation of $\omega$. BABAPPAi reports an Episodic Identifiability Index (EII) as a diagnostic magnitude summary and computes empirical Monte Carlo calibration p-values from matched neutral replicate exceedance, followed by Benjamini--Hochberg q-value adjustment across tested genes. In held-out synthetic benchmarks, predicted burden increased with simulated episodic load, remained unstructured under neutrality, and was more stable at gene level than at individual sites. Performance degraded gradually under recombination-aware segmentation, heterogeneous mutation rates and alignment noise, while deterministic execution and explicit input validation supported robust software behaviour. BABAPPAi is intended as a complement to classical branch--site tests: EII ranks recoverability magnitude, whereas empirical p/q values quantify excess dispersion relative to matched neutral calibration.
 \end{abstract}
 
 \noindent\textbf{Keywords:} episodic selection; branch--site evolution; likelihood-free inference; simulation-based inference; mutation--selection models; phylogenomics
@@ -32,7 +32,8 @@ Branch--site methods are widely used to infer episodic positive selection from c
     \item BABAPPAi targets the \emph{identifiability} of branch--site episodic signal rather than direct hypothesis testing for positive selection.
     \item The framework combines forward simulation under mutation--selection dynamics with likelihood-free neural inference trained on exact latent labels.
     \item Aggregate burden summaries are more recoverable than site-wise signals, indicating that episodic structure may become measurable at gene scale before it is precisely localizable.
-    \item The software reports both $\mathrm{EII}_{z}$ and $\mathrm{EII}_{01}=\sigma(\mathrm{EII}_{z})$, together with \texttt{identifiable\_bool} and \texttt{identifiability\_extent}.
+    \item The software reports $\mathrm{EII}_{z}$ and $\mathrm{EII}_{01}=\sigma(\mathrm{EII}_{z})$ as recoverability diagnostics, and reports empirical calibration significance via \texttt{p\_emp}, \texttt{q\_emp}, and \texttt{significant\_bool}.
+    \item EII bands are retained for descriptive reporting only; inferential significance is defined by \texttt{q\_emp} under matched neutral calibration.
 \end{itemize}
 
 \section{Introduction}
@@ -132,7 +133,20 @@ For bounded user-facing reporting, BABAPPAi uses a deterministic monotone transf
 \]
 By construction, $\mathrm{EII}_{01}\in[0,1]$ and ranking by $\mathrm{EII}_{z}$ and $\mathrm{EII}_{01}$ is identical.
 
-Operational runtime regimes are defined as:
+For inferential calibration, BABAPPAi computes an empirical one-sided Monte Carlo p-value from matched neutral replicate dispersion values $D_0^{(1)},\ldots,D_0^{(M)}$:
+\[
+p_{\mathrm{emp}}=\frac{1+\sum_{m=1}^{M}\mathbf{1}\!\left[D_0^{(m)}\ge D_{\mathrm{obs}}\right]}{M+1}.
+\]
+Across genes in the same analysis set, multiple testing is controlled with Benjamini--Hochberg adjustment:
+\[
+q_{\mathrm{emp}}=\mathrm{BH}\!\left(p_{\mathrm{emp}}\right),
+\]
+and the default significance decision is
+\[
+\texttt{significant\_bool}=\left(q_{\mathrm{emp}}\le \alpha\right), \qquad \alpha=0.05.
+\]
+
+Operational EII reporting bands are retained as descriptive summaries:
 \[
 \begin{array}{ll}
 0.00 \le \mathrm{EII}_{01}<0.30 & \texttt{not\_identifiable},\\
@@ -141,11 +155,7 @@ Operational runtime regimes are defined as:
 0.90 \le \mathrm{EII}_{01}\le 1.00 & \texttt{strongly\_identifiable}.
 \end{array}
 \]
-The binary decision field is
-\[
-\texttt{identifiable\_bool}=\left(\mathrm{EII}_{01}\ge 0.70\right),
-\]
-and the categorical field \texttt{identifiability\_extent} stores one of the four labels above. These quantities are diagnostic and should not be interpreted as dN/dS estimates, likelihood-ratio statistics, or proof of adaptive substitution.
+Legacy fields based on EII thresholds are retained for backward-compatible descriptive reporting only and are not used as the primary inferential rule.
 
 \subsection{Validation and benchmarking}
 
@@ -153,7 +163,7 @@ Validation was performed on held-out simulated datasets generated with independe
 
 Because episodic burden is fundamentally relative, primary evaluation used rank-based criteria. For each alignment, Spearman's rank correlation was computed between true and predicted site burdens and, separately, between true and predicted branch burdens. When the true burden vector was constant, as under strict neutrality, rank correlation is mathematically undefined; such cases were therefore treated as correctly uninformative rather than as failures.
 
-Additional diagnostics included enrichment of true signal among the highest-scoring sites, bootstrap intervals for rank summaries, and a channel-collapse index assessing whether branch-specific outputs degenerated into nearly identical internal representations. To evaluate robustness, stress tests introduced recombination-aware segmentation, heterogeneous mutation rates, alignment noise and malformed input files.
+Additional diagnostics included enrichment of true signal among the highest-scoring sites, bootstrap intervals for rank summaries, and a channel-collapse index assessing whether branch-specific outputs degenerated into nearly identical internal representations. Significance calibration analyses explicitly evaluated neutral $p_{\mathrm{emp}}$ behavior (histograms and QQ diagnostics), neutral significant rate at $q_{\mathrm{emp}}\le\alpha$, and q-based operating characteristics (FPR/TPR) versus descriptive EII-threshold baselines. To evaluate robustness, stress tests introduced recombination-aware segmentation, heterogeneous mutation rates, alignment noise and malformed input files.
 
 For multi-gene synthetic benchmarks, independently simulated genes were concatenated into larger datasets with known gene-level burdens:
 \[
@@ -177,9 +187,9 @@ Under strictly neutral simulations, true burden is constant by construction and 
 
 When recombination-aware block structure, heterogeneous mutation rates and alignment noise were introduced, performance declined relative to the cleanest benchmarks but deteriorated gradually rather than catastrophically. Gene-level ranking remained informative over a broad range of perturbed conditions, whereas fine-scale site localization was more sensitive. This pattern is consistent with previous observations that recombination and alignment error can distort site-wise selection inference in codon-model frameworks \cite{Anisimova2003,FletcherYang2010,JordanGoldman2012}. The results therefore support the use of aggregate diagnostics before strong site-specific claims are made.
 
-\subsection{EII tracks episodic recoverability}
+\subsection{EII magnitude and empirical significance show complementary behavior}
 
-The EII summary increased with simulated episodic burden and remained near the neutral baseline in negative-control datasets. High-EII genes were those in which inferred branch--site dispersion exceeded the calibrated background strongly enough to support meaningful episodic interpretation, whereas low or negative EII values flagged cases in which the data did not justify strong branch--site conclusions. EII therefore functions as a diagnostic gatekeeper: it does not establish adaptation, but it indicates whether the underlying alignment supports statistically interpretable episodic inference.
+EII increased with simulated episodic burden and remained near neutral baseline in negative-control datasets, supporting its role as a recoverability magnitude summary. Empirical calibration support was quantified separately by $p_{\mathrm{emp}}$ and $q_{\mathrm{emp}}$: genes with high episodic burden were enriched for low q-values, while neutral simulations were expected to show low significant rates at $q_{\mathrm{emp}}\le\alpha$ when calibration was adequate. Threshold-based EII calling was therefore treated as a descriptive comparator only, while inferential support was reported through the q-based decision layer.
 
 \subsection{Software behavior is deterministic and robust}
 
@@ -191,19 +201,19 @@ BABAPPAi is built around a simple but important shift in target: from \emph{dete
 
 A second central result is that aggregation stabilizes signal. In the present benchmarks, episodic structure was more recoverable at the gene level than at individual sites. This is both biologically and statistically plausible: episodic adaptation is often sparse, lineage-restricted and transient, so local evidence may be weak even when the gene as a whole carries a real episodic burden. BABAPPAi does not eliminate this difficulty; rather, it quantifies where along the scale hierarchy recoverability begins to emerge.
 
-The EII statistic is useful precisely because it formalizes this question. A high EII indicates that branch--site dispersion exceeds matched neutral expectation strongly enough for episodic interpretation to be statistically meaningful. A low EII indicates that the available data do not support confident episodic interpretation under the chosen calibration. Importantly, EII is not a direct measure of adaptation, nor should negative values be overinterpreted as evidence of purifying selection. Its role is diagnostic: it evaluates whether the branch--site question is well posed for the alignment under study.
+The revised inference layer separates diagnostic magnitude from inferential support. EII remains useful because it quantifies recoverability magnitude on a continuous scale, but inferential support is now based on empirical calibration p-values and BH-adjusted q-values under matched neutral simulation. In this framing, significance indicates excess branch--site dispersion relative to matched neutral expectation. It is not equivalent to dN/dS estimation and does not by itself prove adaptive substitution.
 
 The method is intended to complement, not replace, established branch--site procedures such as PAML and HyPhy \cite{Yang2007,Murrell2012,KosakovskyPond2011,KosakovskyPond2020}. In practice, classical likelihood-based tests can still be used to estimate selection effects under explicit codon models, but their outputs may be interpreted more cautiously when BABAPPAi reports low identifiability. Conversely, convergence between strong classical evidence and high EII should increase confidence that the data contain recoverable episodic structure rather than unstable model-driven signal.
 
-Several limitations should be noted. First, the realism of inference depends on the realism of the simulator. Although the simulator incorporates mutation bias, codon-usage heterogeneity, branch-specific perturbation and local segmentation, it cannot capture every feature of real coding-sequence evolution. Second, the current framework yields diagnostic scores rather than formal posterior probabilities or hypothesis tests. Third, the numerical behavior of EII depends on the selected dispersion statistic and on the quality of the matched neutral calibration. Finally, the present manuscript is based on synthetic benchmarking; empirical application will require careful mapping of operational branch labels back onto biologically motivated phylogenetic hypotheses.
+Several limitations should be noted. First, the realism of inference depends on the realism of the simulator. Although the simulator incorporates mutation bias, codon-usage heterogeneity, branch-specific perturbation and local segmentation, it cannot capture every feature of real coding-sequence evolution. Second, empirical p-values are simulator-conditional; significance quality depends on the adequacy of matched neutral calibration. Third, numerical behavior of EII depends on the selected dispersion statistic and calibration dispersion scale, so EII bands should remain descriptive. Finally, the present manuscript is based on synthetic benchmarking; empirical application will require careful mapping of operational branch labels back onto biologically motivated phylogenetic hypotheses.
 
 \section{Conclusion}
 
-BABAPPAi reframes branch--site analysis around the recoverability of episodic signal. By combining forward simulation under mutation--selection dynamics with likelihood-free neural inference, it diagnoses whether coding-sequence alignments contain enough structured variation for episodic interpretation and identifies the scale at which that structure becomes measurable. The framework does not substitute for classical branch--site testing, but it provides a useful diagnostic layer that helps distinguish biologically absent signal from statistically unrecoverable signal.
+BABAPPAi reframes branch--site analysis around recoverability and matched-neutral calibration. By combining forward simulation under mutation--selection dynamics with likelihood-free neural inference, it diagnoses whether coding-sequence alignments contain enough structured variation for episodic interpretation and identifies the scale at which that structure becomes measurable. The framework reports EII as a diagnostic magnitude measure and empirical p/q calibration support as inferential evidence of excess dispersion relative to matched neutral expectation. It does not substitute for classical branch--site testing and does not claim proof of adaptive substitution.
 
 \section*{Availability and implementation}
 
-BABAPPAi is available as an open-source Python package at \url{https://github.com/krishnendusinha/babappai} and as the installable package \texttt{babappai} with CLI command \texttt{babappai}. BABAPPAi is the renamed continuation of the BABAPPA$\Omega$ codebase. Legacy frozen-model assets currently remain under the BABAPPA$\Omega$ naming for provenance and reproducibility; the frozen reference model used here is archived at \url{https://doi.org/10.5281/zenodo.18195869}. Legacy software-release provenance is archived at \url{https://doi.org/10.5281/zenodo.18520163}. Benchmarking artifacts, execution logs and related reproducibility materials are archived at \url{https://doi.org/10.5281/zenodo.18197957}.
+BABAPPAi is available as an open-source Python package at \url{https://github.com/krishnendusinha/babappai} and as the installable package \texttt{babappai} with CLI command \texttt{babappai}. The released software reports EII diagnostics together with empirical matched-neutral p-values and BH-adjusted q-values. BABAPPAi is the renamed continuation of the BABAPPA$\Omega$ codebase. Legacy frozen-model assets currently remain under the BABAPPA$\Omega$ naming for provenance and reproducibility; the frozen reference model used here is archived at \url{https://doi.org/10.5281/zenodo.18195869}. Legacy software-release provenance is archived at \url{https://doi.org/10.5281/zenodo.18520163}. Benchmarking artifacts, execution logs and related reproducibility materials are archived at \url{https://doi.org/10.5281/zenodo.18197957}.
 
 \section*{Data availability}
 

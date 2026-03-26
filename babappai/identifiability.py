@@ -1,4 +1,4 @@
-"""Identifiability score transforms and interpretation policy."""
+"""EII transforms and descriptive (non-inferential) reporting bands."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ REGIME_NOT_IDENTIFIABLE = "not_identifiable"
 REGIME_WEAK_OR_AMBIGUOUS = "weak_or_ambiguous"
 REGIME_IDENTIFIABLE = "identifiable"
 REGIME_STRONGLY_IDENTIFIABLE = "strongly_identifiable"
+EII_BANDS_DESCRIPTIVE_ONLY = True
 
 
 def eii01_from_eiiz(eii_z: float) -> float:
@@ -29,6 +30,7 @@ def identifiability_extent(eii_01: float) -> str:
 
 
 def identifiability_bool(eii_01: float) -> bool:
+    """Legacy descriptive flag retained for backward compatibility."""
     return eii_01 >= 0.70
 
 
@@ -39,4 +41,5 @@ def interpret_identifiability(eii_z: float) -> Dict[str, object]:
         "EII_01": eii_01,
         "identifiable_bool": identifiability_bool(eii_01),
         "identifiability_extent": extent,
+        "eii_band_descriptive_only": EII_BANDS_DESCRIPTIVE_ONLY,
     }

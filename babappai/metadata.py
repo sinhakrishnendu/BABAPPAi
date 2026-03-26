@@ -2,7 +2,7 @@
 
 PACKAGE_NAME = "babappai"
 SOFTWARE_NAME = "BABAPPAi"
-SOFTWARE_VERSION = "2.0.0"
+SOFTWARE_VERSION = "2.1.0"
 SOFTWARE_DOI = "10.5281/zenodo.18520163"
 
 LEGACY_CODEBASE_NAME = "BABAPPAΩ"
@@ -17,4 +17,3 @@ MODEL_COMPATIBILITY_NOTE = (
     "The cached frozen model is a legacy BABAPPAΩ asset used for "
     "backward-compatible inference until BABAPPAi-specific weights are released."
 )
-

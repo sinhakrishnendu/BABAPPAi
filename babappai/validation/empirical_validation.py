@@ -13,6 +13,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from babappai.run_pipeline import run_and_write_outputs
+from babappai.stats import annotate_bh_qvalues
 from babappai.validation.orthogroup_qc import orthogroup_id_from_path
 
 
@@ -41,6 +42,18 @@ def _write_tsv(path: Path, rows: List[Dict[str, Any]], fieldnames: List[str]) ->
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def _annotate_empirical_qvalues(rows: List[Dict[str, Any]], alpha: float) -> None:
+    annotate_bh_qvalues(rows, p_key="p_emp", q_key="q_emp")
+    for row in rows:
+        try:
+            qv = float(row.get("q_emp", float("nan")))
+        except (TypeError, ValueError):
+            qv = float("nan")
+        row["alpha_used"] = float(alpha)
+        row["significant_bool"] = bool(qv <= alpha) if qv == qv else False
+        row["significance_label"] = "significant" if row["significant_bool"] else "not_significant"
 
 
 def _write_star_tree_for_alignment(alignment_path: Path, out_tree_path: Path) -> Path:
@@ -114,6 +127,11 @@ def run_empirical_validation(
     foreground_list: Optional[str],
     offline: bool,
     overwrite: bool,
+    sigma_floor: float,
+    alpha: float,
+    pvalue_mode: str,
+    min_neutral_group_size: int,
+    neutral_reps: int,
     robustness_limit: int = 10,
 ) -> Dict[str, Any]:
     out = Path(outdir).expanduser().resolve()
@@ -156,6 +174,11 @@ def run_empirical_validation(
             foreground_list=foreground_list,
             offline=offline,
             overwrite=overwrite,
+            sigma_floor=sigma_floor,
+            alpha=alpha,
+            pvalue_mode=pvalue_mode,
+            min_neutral_group_size=min_neutral_group_size,
+            neutral_reps=neutral_reps,
         )
 
         gene = payload["gene_summary"]
@@ -163,8 +186,22 @@ def run_empirical_validation(
             "orthogroup_id": orthogroup_id,
             "alignment_path": str(alignment_path),
             "tree_path": str(tree_path),
+            "D_obs": gene.get("D_obs"),
+            "mu0": gene.get("mu0"),
+            "sigma0_raw": gene.get("sigma0_raw"),
+            "sigma0_final": gene.get("sigma0_final"),
+            "sigma_floor_used": gene.get("sigma_floor_used"),
+            "fallback_flag": gene.get("fallback_flag"),
+            "fallback_reason": gene.get("fallback_reason"),
+            "neutral_group_size": gene.get("neutral_group_size"),
+            "calibration_group": gene.get("calibration_group"),
             "EII_z": gene["EII_z"],
             "EII_01": gene["EII_01"],
+            "p_emp": gene.get("p_emp"),
+            "q_emp": gene.get("q_emp"),
+            "alpha_used": gene.get("alpha_used"),
+            "significant_bool": gene.get("significant_bool"),
+            "significance_label": gene.get("significance_label"),
             "identifiable_bool": gene["identifiable_bool"],
             "identifiability_extent": gene["identifiability_extent"],
             "results_json": str(orthogroup_out / "results.json"),
@@ -192,6 +229,11 @@ def run_empirical_validation(
                 foreground_list=foreground_list,
                 offline=offline,
                 overwrite=True,
+                sigma_floor=sigma_floor,
+                alpha=alpha,
+                pvalue_mode=pvalue_mode,
+                min_neutral_group_size=min_neutral_group_size,
+                neutral_reps=neutral_reps,
             )
             summary["repeatability_delta_EII_01"] = abs(
                 float(repeat["gene_summary"]["EII_01"]) - float(gene["EII_01"])
@@ -211,6 +253,11 @@ def run_empirical_validation(
                 foreground_list=foreground_list,
                 offline=offline,
                 overwrite=True,
+                sigma_floor=sigma_floor,
+                alpha=alpha,
+                pvalue_mode=pvalue_mode,
+                min_neutral_group_size=min_neutral_group_size,
+                neutral_reps=neutral_reps,
             )
             summary["calibration_delta_EII_01"] = abs(
                 float(compare_cal["gene_summary"]["EII_01"]) - float(gene["EII_01"])
@@ -239,6 +286,11 @@ def run_empirical_validation(
                     foreground_list=foreground_list,
                     offline=offline,
                     overwrite=True,
+                    sigma_floor=sigma_floor,
+                    alpha=alpha,
+                    pvalue_mode=pvalue_mode,
+                    min_neutral_group_size=min_neutral_group_size,
+                    neutral_reps=neutral_reps,
                 )
                 summary["taxon_subsample_delta_EII_01"] = abs(
                     float(subsampled["gene_summary"]["EII_01"]) - float(gene["EII_01"])
@@ -267,6 +319,11 @@ def run_empirical_validation(
                 foreground_list=foreground_list,
                 offline=offline,
                 overwrite=True,
+                sigma_floor=sigma_floor,
+                alpha=alpha,
+                pvalue_mode=pvalue_mode,
+                min_neutral_group_size=min_neutral_group_size,
+                neutral_reps=neutral_reps,
             )
             summary["perturbation_delta_EII_01"] = abs(
                 float(perturbed["gene_summary"]["EII_01"]) - float(gene["EII_01"])
@@ -275,13 +332,28 @@ def run_empirical_validation(
         summary_rows.append(summary)
 
     summary_rows.sort(key=lambda row: row["orthogroup_id"])
+    _annotate_empirical_qvalues(summary_rows, alpha=alpha)
 
     fields = [
         "orthogroup_id",
         "alignment_path",
         "tree_path",
+        "D_obs",
+        "mu0",
+        "sigma0_raw",
+        "sigma0_final",
+        "sigma_floor_used",
+        "fallback_flag",
+        "fallback_reason",
+        "neutral_group_size",
+        "calibration_group",
         "EII_z",
         "EII_01",
+        "p_emp",
+        "q_emp",
+        "alpha_used",
+        "significant_bool",
+        "significance_label",
         "identifiable_bool",
         "identifiability_extent",
         "repeatability_delta_EII_01",
@@ -301,8 +373,9 @@ def run_empirical_validation(
         "selected_input": str(Path(selected_input).resolve()),
         "n_orthogroups": len(summary_rows),
         "robustness_limit": robustness_limit,
+        "alpha_used": float(alpha),
+        "pvalue_mode": pvalue_mode,
         "note": "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase.",
     }
     (out / "empirical_metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     return metadata
-

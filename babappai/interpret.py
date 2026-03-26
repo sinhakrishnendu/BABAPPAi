@@ -59,6 +59,11 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     gene = results.get("gene_summary") or results.get("gene_level_identifiability", {})
     eii_z = gene.get("EII_z")
     eii_01 = gene.get("EII_01")
+    p_emp = gene.get("p_emp")
+    q_emp = gene.get("q_emp")
+    alpha_used = gene.get("alpha_used")
+    significant_bool = gene.get("significant_bool")
+    significance_label = gene.get("significance_label")
     identifiable = gene.get("identifiable_bool")
     extent = gene.get("identifiability_extent")
 
@@ -71,10 +76,19 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     lines.append("")
     lines.append("Verdict")
     lines.append("-" * 60)
+    if p_emp is not None:
+        lines.append(f"Empirical p-value (p_emp): {float(p_emp):.4g}")
+    if q_emp is not None:
+        lines.append(f"BH-adjusted q-value (q_emp): {float(q_emp):.4g}")
+    if alpha_used is not None:
+        lines.append(
+            f"Significant at q <= {float(alpha_used):.2f}: "
+            f"{'YES' if bool(significant_bool) else 'NO'} ({significance_label})"
+        )
     lines.append(f"Gene-level EII_z: {float(eii_z):.3f}")
     lines.append(f"Gene-level EII_01: {float(eii_01):.3f}")
-    lines.append(f"Identifiable: {'YES' if identifiable else 'NO'}")
-    lines.append(f"Regime: {extent}")
+    lines.append(f"Descriptive EII band: {extent}")
+    lines.append(f"Legacy identifiable_bool (descriptive): {'YES' if identifiable else 'NO'}")
     lines.append(_regime_explanation(str(extent)))
     lines.append("")
 
@@ -102,7 +116,7 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
         lines.append("No site-level rows available.")
     lines.append("")
 
-    lines.append("Interpretation Policy")
+    lines.append("Interpretation Policy (Descriptive Bands)")
     lines.append("-" * 60)
     lines.append("0.00 <= EII_01 < 0.30  -> not_identifiable")
     lines.append("0.30 <= EII_01 < 0.70  -> weak_or_ambiguous")
@@ -110,8 +124,12 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     lines.append("0.90 <= EII_01 <= 1.00 -> strongly_identifiable")
     lines.append("")
     lines.append(
-        "Warning: this is a diagnostic identifiability score and must not be "
-        "interpreted as evidence of adaptive substitution."
+        "Inferential significance is based on empirical p_emp/q_emp from matched neutral calibration; "
+        "EII bands are reporting-only."
+    )
+    lines.append(
+        "Warning: significance indicates excess dispersion relative to matched neutral expectation, "
+        "not proof of adaptive substitution."
     )
 
     return "\n".join(lines) + "\n"

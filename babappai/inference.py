@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
@@ -15,6 +15,7 @@ from babappai.encoding import encode_alignment
 from babappai.identifiability import interpret_identifiability
 from babappai.metadata import MODEL_TAG
 from babappai.model_manager import ensure_model, model_status
+from babappai.stats import empirical_monte_carlo_pvalue
 from babappai.tree import enumerate_branches, load_tree
 from babappai.utils import resolve_device
 
@@ -137,18 +138,42 @@ def run_inference(
     foreground_mode: str = "all-leaves",
     foreground_list_path: Optional[str] = None,
     batch_size: int = 1,
+    sigma_floor: float = 0.0,
+    alpha: float = 0.05,
+    pvalue_mode: str = "empirical_monte_carlo",
+    neutral_reps: int = 200,
+    min_neutral_group_size: int = 20,
+    retain_eii_bands: bool = True,
+    report_threshold_bands: bool = True,
+    _model_override=None,
+    _resolved_device_override=None,
 ) -> Dict[str, object]:
     """Run branch-conditioned inference and return structured outputs."""
 
     warnings: List[str] = [
         "Diagnostic identifiability score, not evidence of adaptive substitution.",
     ]
+    if not (0.0 < alpha <= 1.0):
+        raise ValueError("alpha must be in (0, 1].")
+    if sigma_floor < 0:
+        raise ValueError("sigma_floor must be >= 0.")
+    if neutral_reps < 0:
+        raise ValueError("neutral_reps must be >= 0.")
+    if min_neutral_group_size < 0:
+        raise ValueError("min_neutral_group_size must be >= 0.")
+    allowed_modes = {"empirical_monte_carlo", "frozen_reference", "disabled"}
+    if pvalue_mode not in allowed_modes:
+        raise ValueError(f"Unsupported pvalue_mode: {pvalue_mode}. Allowed: {sorted(allowed_modes)}")
 
     _set_seed(seed)
 
-    resolved_device = resolve_device(device)
-    model_path = ensure_model(model_tag, offline=offline)
-    model = torch.jit.load(str(model_path), map_location=resolved_device)
+    resolved_device = _resolved_device_override if _resolved_device_override is not None else resolve_device(device)
+    if _model_override is None:
+        model_path = ensure_model(model_tag, offline=offline)
+        model = torch.jit.load(str(model_path), map_location=resolved_device)
+    else:
+        model = _model_override
+        model_path = Path(model_status().get("cached_path") or "")
     model.eval()
 
     X, ntaxa, L = encode_alignment(alignment_path)
@@ -208,63 +233,171 @@ def run_inference(
             "the frozen model runner."
         )
 
-    calibration_source = "tree_conditional_monte_carlo" if tree_calibration else "frozen_reference_table"
+    calibration_group = f"L_{L}_K_{K}"
+    calibration_source = "disabled_for_neutral_simulation"
     neutral_expected_variance: Optional[float]
-    neutral_sd: Optional[float]
-    empirical_p: Optional[float] = None
+    neutral_sd_raw: Optional[float]
+    neutral_sd_floored: Optional[float]
+    neutral_group_size: Optional[int] = None
+    neutral_replicates: List[float] = []
+    fallback_flag = False
+    fallback_reason: Optional[str] = None
+    p_emp_raw = float("nan")
 
-    if tree_calibration:
+    if pvalue_mode == "disabled":
+        neutral_expected_variance = sigma2_obs
+        neutral_sd_raw = 0.0
+        neutral_group_size = 0
+        p_emp_raw = 1.0
+    elif pvalue_mode == "empirical_monte_carlo":
         from babappai.tree_calibration import monte_carlo_neutral
 
+        n_empirical = int(neutral_reps if neutral_reps > 0 else N_calibration)
+        if n_empirical <= 0:
+            raise ValueError("At least one neutral replicate is required for empirical_monte_carlo mode.")
+        calibration_source = "tree_conditional_empirical_monte_carlo"
         mu0, sd0, sims = monte_carlo_neutral(
             tree=tree,
             L=L,
             inference_function=run_inference,
             model_tag=model_tag,
-            N=N_calibration,
+            N=n_empirical,
             offline=offline,
             foreground_mode=foreground_mode,
             foreground_list_path=foreground_list_path,
             batch_size=batch_size,
+            inference_extra_kwargs={
+                "_model_override": model,
+                "_resolved_device_override": resolved_device,
+                "retain_eii_bands": retain_eii_bands,
+                "report_threshold_bands": report_threshold_bands,
+            },
         )
+        sims_arr = np.asarray(sims, dtype=float)
+        neutral_replicates = sims_arr.tolist()
         neutral_expected_variance = float(mu0)
-        neutral_sd = float(sd0)
-        empirical_p = float((1 + np.sum(sims >= sigma2_obs)) / (len(sims) + 1))
+        neutral_sd_raw = float(sd0)
+        neutral_group_size = int(sims_arr.size)
+        p_emp_raw = empirical_monte_carlo_pvalue(sigma2_obs, neutral_replicates)
     else:
+        calibration_source = "frozen_reference_table"
         reference = get_neutral_reference(L=L, K=K, model_tag=model_tag)
         if reference is None:
             neutral_expected_variance = sigma2_obs
-            neutral_sd = 1.0
+            neutral_sd_raw = None
+            neutral_group_size = 0
+            fallback_flag = True
+            fallback_reason = "missing_neutral_reference"
             calibration_source = "fallback_uncalibrated"
             warnings.append(
-                "No neutral reference available for this alignment/tree size; "
-                "using deterministic fallback calibration (EII_z=0 baseline)."
+                "No frozen neutral reference available for this alignment/tree size; "
+                "falling back to floor-bounded sigma0 with p_emp unavailable."
             )
         else:
             neutral_expected_variance = float(reference["sigma2_mean"])
-            neutral_sd = float(reference["sigma2_sd"])
+            neutral_sd_raw = float(reference["sigma2_sd"])
+            if "n_replicates" in reference:
+                neutral_group_size = int(reference["n_replicates"])
+            elif "n" in reference:
+                neutral_group_size = int(reference["n"])
+            else:
+                neutral_group_size = 0
+        warnings.append(
+            "pvalue_mode=frozen_reference does not provide empirical Monte Carlo p-values; "
+            "use pvalue_mode=empirical_monte_carlo for significance decisions."
+        )
+
+    if pvalue_mode != "disabled" and int(neutral_group_size or 0) < int(min_neutral_group_size):
+        fallback_flag = True
+        if fallback_reason is None:
+            fallback_reason = "neutral_group_below_minimum"
+        warnings.append(
+            "Neutral calibration group size below configured minimum "
+            f"({neutral_group_size} < {min_neutral_group_size})."
+        )
+
+    if neutral_sd_raw is None or not np.isfinite(neutral_sd_raw) or neutral_sd_raw <= 0:
+        if not fallback_flag:
+            fallback_flag = True
+            fallback_reason = "non_positive_or_invalid_neutral_sd"
+        neutral_sd_base = 0.0
+    else:
+        neutral_sd_base = float(neutral_sd_raw)
+
+    neutral_sd_floored = max(neutral_sd_base, float(sigma_floor))
+    if neutral_sd_floored <= 0:
+        fallback_flag = True
+        if fallback_reason is None:
+            fallback_reason = "non_positive_sigma_after_floor"
+        neutral_sd_floored = 1e-8
+
+    sigma_floor_applied = bool(sigma_floor > 0 and neutral_sd_floored == float(sigma_floor))
 
     dispersion_ratio = None
     if neutral_expected_variance and neutral_expected_variance > 0:
         dispersion_ratio = float(sigma2_obs / neutral_expected_variance)
 
-    if neutral_sd is None or neutral_sd <= 0:
-        eii_z = 0.0
-        warnings.append("Neutral variance spread was non-positive; EII_z set to 0.")
+    eii_z = float((sigma2_obs - neutral_expected_variance) / neutral_sd_floored)
+    eii_q = float(eii_z)
+    if np.isfinite(p_emp_raw):
+        q_emp = float(p_emp_raw)
     else:
-        eii_z = float((sigma2_obs - neutral_expected_variance) / neutral_sd)
+        q_emp = float("nan")
+    significant_bool = bool(np.isfinite(q_emp) and q_emp <= float(alpha))
+    significance_label = "significant" if significant_bool else "not_significant"
 
-    ident = interpret_identifiability(eii_z)
+    if fallback_flag and fallback_reason:
+        warnings.append(
+            "Neutral calibration fallback applied: "
+            f"{fallback_reason}; using sigma0={neutral_sd_floored:.6g}."
+        )
+    warnings.append(
+        "EII threshold-derived fields (identifiable_bool, identifiability_extent) are "
+        "descriptive only and deprecated for inferential decisions. "
+        "Use p_emp/q_emp/significant_bool."
+    )
+
+    ident = interpret_identifiability(eii_q)
+    band_extent = ident["identifiability_extent"] if retain_eii_bands else "descriptive_band_suppressed"
+    band_bool = bool(ident["identifiable_bool"]) if retain_eii_bands else False
     gene_summary = {
+        "D_obs": sigma2_obs,
+        "mu0": neutral_expected_variance,
+        "sigma0_raw": neutral_sd_raw,
+        "sigma0_final": neutral_sd_floored,
+        "sigma_floor_used": float(sigma_floor),
+        "fallback_flag": fallback_flag,
+        "fallback_reason": fallback_reason,
+        "neutral_group_size": neutral_group_size,
+        "calibration_group": calibration_group,
+        "calibration_source": calibration_source,
+        "p_emp": p_emp_raw,
+        "p_emp_raw": p_emp_raw,
+        "q_emp": q_emp,
+        "alpha_used": float(alpha),
+        "significant_bool": significant_bool,
+        "significance_label": significance_label,
+        "pvalue_mode": pvalue_mode,
+        "neutral_replicates": neutral_replicates,
+        "eii_band_descriptive_only": True,
+        "retain_eii_bands": bool(retain_eii_bands),
+        "report_threshold_bands": bool(report_threshold_bands),
         "observed_variance": sigma2_obs,
         "neutral_expected_variance": neutral_expected_variance,
+        "neutral_sd": neutral_sd_floored,
+        "neutral_sd_raw": neutral_sd_raw,
+        "neutral_sd_floored": neutral_sd_floored,
+        "sigma_floor": float(sigma_floor),
+        "sigma_floor_applied": sigma_floor_applied,
+        "calibration_fallback_flag": fallback_flag,
+        "calibration_fallback_reason": fallback_reason,
         "dispersion_ratio": dispersion_ratio,
-        "EII_z": eii_z,
+        "EII_z": eii_q,
         "EII_01": float(ident["EII_01"]),
-        "identifiable_bool": bool(ident["identifiable_bool"]),
-        "identifiability_extent": ident["identifiability_extent"],
-        "empirical_p": empirical_p,
-        "calibration_source": calibration_source,
+        "identifiable_bool": band_bool,
+        "identifiability_extent": band_extent,
+        "identifiable_bool_deprecated": band_bool,
+        "identifiability_extent_deprecated": band_extent,
     }
 
     branch_results = []
@@ -297,11 +430,7 @@ def run_inference(
         "num_sites": L,
         "n_sequences": ntaxa,
         "device": str(resolved_device),
-        "model_status": {
-            **model_status(),
-            "cached_path": str(model_path),
-            "verified": True,
-        },
+        "model_status": {**model_status(), "cached_path": str(model_path), "verified": True},
         "site_scores": site_scores.tolist(),
         "site_logit_mean": site_logit_mean.tolist(),
         "site_logit_var": site_logit_var.tolist(),
@@ -320,6 +449,7 @@ def run_inference(
             "mode": foreground_mode,
             "selected_branches": sorted(selected_foregrounds),
         },
+        "neutral_calibration_replicates": neutral_replicates,
         "warnings": warnings,
     }
 
