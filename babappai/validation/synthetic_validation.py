@@ -144,7 +144,7 @@ def run_synthetic_validation(
             runtime_sec = time.perf_counter() - start
 
             gene = inference_payload["gene_summary"]
-            regime = gene["identifiability_extent"]
+            regime = str(gene.get("ceii_gene_class", gene["identifiability_extent"]))
             regime_counts[regime] += 1
 
             replicate_rows.append(
@@ -167,8 +167,18 @@ def run_synthetic_validation(
                     "fallback_reason": gene.get("fallback_reason"),
                     "neutral_group_size": gene.get("neutral_group_size"),
                     "calibration_group": gene.get("calibration_group"),
+                    "calibration_version": gene.get("calibration_version"),
+                    "domain_shift_or_applicability": gene.get("domain_shift_or_applicability"),
                     "EII_z": gene["EII_z"],
                     "EII_01": gene["EII_01"],
+                    "eii_z_raw": gene.get("eii_z_raw", gene["EII_z"]),
+                    "eii_01_raw": gene.get("eii_01_raw", gene["EII_01"]),
+                    "ceii_gene": gene.get("ceii_gene"),
+                    "ceii_site": gene.get("ceii_site"),
+                    "ceii_gene_class": gene.get("ceii_gene_class"),
+                    "ceii_site_class": gene.get("ceii_site_class"),
+                    "ceii_gene_identifiable_bool": gene.get("ceii_gene_identifiable_bool"),
+                    "ceii_site_identifiable_bool": gene.get("ceii_site_identifiable_bool"),
                     "p_emp": gene.get("p_emp"),
                     "q_emp": gene.get("q_emp"),
                     "alpha_used": gene.get("alpha_used"),

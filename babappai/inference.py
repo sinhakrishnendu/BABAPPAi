@@ -10,10 +10,15 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 import torch
 
-from babappai.calibration import get_neutral_reference
+from babappai.calibration import (
+    D_OBS_DEFINITION,
+    apply_ceii_calibration,
+    get_neutral_reference,
+    load_calibration_asset,
+)
 from babappai.encoding import encode_alignment
-from babappai.identifiability import interpret_identifiability
-from babappai.metadata import MODEL_TAG
+from babappai.identifiability import eii01_from_eiiz
+from babappai.metadata import MODEL_DOI, MODEL_FILE_NAME, MODEL_SHA256, MODEL_TAG
 from babappai.model_manager import ensure_model, model_status
 from babappai.stats import empirical_monte_carlo_pvalue
 from babappai.tree import enumerate_branches, load_tree
@@ -145,6 +150,8 @@ def run_inference(
     min_neutral_group_size: int = 20,
     retain_eii_bands: bool = True,
     report_threshold_bands: bool = True,
+    ceii_enabled: bool = True,
+    ceii_asset_path: Optional[str] = None,
     _model_override=None,
     _resolved_device_override=None,
 ) -> Dict[str, object]:
@@ -337,8 +344,8 @@ def run_inference(
     if neutral_expected_variance and neutral_expected_variance > 0:
         dispersion_ratio = float(sigma2_obs / neutral_expected_variance)
 
-    eii_z = float((sigma2_obs - neutral_expected_variance) / neutral_sd_floored)
-    eii_q = float(eii_z)
+    eii_z_raw = float((sigma2_obs - neutral_expected_variance) / neutral_sd_floored)
+    eii_01_raw = float(eii01_from_eiiz(eii_z_raw))
     if np.isfinite(p_emp_raw):
         q_emp = float(p_emp_raw)
     else:
@@ -351,17 +358,55 @@ def run_inference(
             "Neutral calibration fallback applied: "
             f"{fallback_reason}; using sigma0={neutral_sd_floored:.6g}."
         )
-    warnings.append(
-        "EII threshold-derived fields (identifiable_bool, identifiability_extent) are "
-        "descriptive only and deprecated for inferential decisions. "
-        "Use p_emp/q_emp/significant_bool."
-    )
+    ceii_payload: Dict[str, Any] = {
+        "ceii_gene": float("nan"),
+        "ceii_site": float("nan"),
+        "ceii_gene_class": "calibration_unavailable",
+        "ceii_site_class": "calibration_unavailable",
+        "ceii_gene_identifiable_bool": False,
+        "ceii_site_identifiable_bool": False,
+        "ceii_ci": {
+            "gene": {"lower": float("nan"), "upper": float("nan")},
+            "site": {"lower": float("nan"), "upper": float("nan")},
+        },
+        "domain_shift_or_applicability": "unknown",
+        "calibration_version": "unavailable",
+    }
+    if ceii_enabled:
+        try:
+            calibration_asset = load_calibration_asset(ceii_asset_path)
+            ceii_payload = apply_ceii_calibration(
+                eii_z_raw=eii_z_raw,
+                n_taxa=ntaxa,
+                gene_length_nt=L,
+                asset=calibration_asset,
+            )
+        except Exception as exc:
+            warnings.append(
+                "cEII calibration unavailable; returning raw EII diagnostics only. "
+                f"Reason: {exc}"
+            )
+    else:
+        warnings.append("cEII calibration disabled by caller; returning raw EII diagnostics only.")
 
-    ident = interpret_identifiability(eii_q)
-    band_extent = ident["identifiability_extent"] if retain_eii_bands else "descriptive_band_suppressed"
-    band_bool = bool(ident["identifiable_bool"]) if retain_eii_bands else False
+    if retain_eii_bands:
+        band_extent = str(ceii_payload.get("ceii_gene_class", "calibration_unavailable"))
+        band_bool = bool(ceii_payload.get("ceii_gene_identifiable_bool", False))
+    else:
+        band_extent = "descriptive_band_suppressed"
+        band_bool = False
+
+    warnings.append(
+        "Raw EII is a dispersion magnitude statistic. Decision-ready identifiability "
+        "is represented by cEII outputs calibrated on held-out simulation truth."
+    )
+    warnings.append(
+        "Inferential significance remains separate: use p_emp/q_emp/significant_bool "
+        "for matched-neutral exceedance support."
+    )
     gene_summary = {
         "D_obs": sigma2_obs,
+        "D_obs_definition": D_OBS_DEFINITION,
         "mu0": neutral_expected_variance,
         "sigma0_raw": neutral_sd_raw,
         "sigma0_final": neutral_sd_floored,
@@ -379,7 +424,7 @@ def run_inference(
         "significance_label": significance_label,
         "pvalue_mode": pvalue_mode,
         "neutral_replicates": neutral_replicates,
-        "eii_band_descriptive_only": True,
+        "eii_band_descriptive_only": False,
         "retain_eii_bands": bool(retain_eii_bands),
         "report_threshold_bands": bool(report_threshold_bands),
         "observed_variance": sigma2_obs,
@@ -392,12 +437,30 @@ def run_inference(
         "calibration_fallback_flag": fallback_flag,
         "calibration_fallback_reason": fallback_reason,
         "dispersion_ratio": dispersion_ratio,
-        "EII_z": eii_q,
-        "EII_01": float(ident["EII_01"]),
+        "eii_z_raw": eii_z_raw,
+        "eii_01_raw": eii_01_raw,
+        "EII_z": eii_z_raw,
+        "EII_01": eii_01_raw,
+        "ceii_gene": float(ceii_payload["ceii_gene"]),
+        "ceii_site": float(ceii_payload["ceii_site"]),
+        "ceii_gene_class": str(ceii_payload["ceii_gene_class"]),
+        "ceii_site_class": str(ceii_payload["ceii_site_class"]),
+        "ceii_gene_identifiable_bool": bool(ceii_payload["ceii_gene_identifiable_bool"]),
+        "ceii_site_identifiable_bool": bool(ceii_payload["ceii_site_identifiable_bool"]),
+        "ceii_ci": ceii_payload["ceii_ci"],
+        "domain_shift_or_applicability": str(ceii_payload["domain_shift_or_applicability"]),
+        "calibration_version": str(ceii_payload["calibration_version"]),
         "identifiable_bool": band_bool,
         "identifiability_extent": band_extent,
         "identifiable_bool_deprecated": band_bool,
         "identifiability_extent_deprecated": band_extent,
+        "model_version": str(model_tag),
+        "model_checkpoint_provenance": {
+            "model_file_name": MODEL_FILE_NAME,
+            "model_doi": MODEL_DOI,
+            "model_sha256": MODEL_SHA256,
+            "cached_path": str(model_path),
+        },
     }
 
     branch_results = []
@@ -426,6 +489,13 @@ def run_inference(
     result = {
         "model": "BABAPPAiLegacyFrozenModel",
         "model_tag": model_tag,
+        "model_version": str(model_tag),
+        "model_checkpoint_provenance": {
+            "model_file_name": MODEL_FILE_NAME,
+            "model_doi": MODEL_DOI,
+            "model_sha256": MODEL_SHA256,
+            "cached_path": str(model_path),
+        },
         "num_branches": K,
         "num_sites": L,
         "n_sequences": ntaxa,

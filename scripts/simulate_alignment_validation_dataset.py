@@ -27,8 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=123)
     p.add_argument(
         "--dispersion_choices",
-        default="site_logit_variance,site_score_variance",
-        help="Comma-separated optional dispersion-statistic labels",
+        default="site_logit_variance",
+        help="Comma-separated dispersion statistic labels. Locked method supports site_logit_variance only.",
     )
     return p
 

@@ -53,6 +53,11 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
                 "id": row.get("orthogroup_id", ""),
                 "EII_z": row.get("EII_z", ""),
                 "EII_01": row.get("EII_01", ""),
+                "ceii_gene": row.get("ceii_gene", ""),
+                "ceii_site": row.get("ceii_site", ""),
+                "ceii_gene_class": row.get("ceii_gene_class", row.get("identifiability_extent", "")),
+                "ceii_site_class": row.get("ceii_site_class", ""),
+                "calibration_version": row.get("calibration_version", ""),
                 "p_emp": row.get("p_emp", ""),
                 "q_emp": row.get("q_emp", ""),
                 "significant_bool": row.get("significant_bool", ""),
@@ -69,6 +74,11 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
                 "id": row.get("replicate_id", ""),
                 "EII_z": row.get("EII_z", ""),
                 "EII_01": row.get("EII_01", ""),
+                "ceii_gene": row.get("ceii_gene", ""),
+                "ceii_site": row.get("ceii_site", ""),
+                "ceii_gene_class": row.get("ceii_gene_class", row.get("identifiability_extent", "")),
+                "ceii_site_class": row.get("ceii_site_class", ""),
+                "calibration_version": row.get("calibration_version", ""),
                 "p_emp": row.get("p_emp", ""),
                 "q_emp": row.get("q_emp", ""),
                 "significant_bool": row.get("significant_bool", ""),
@@ -84,8 +94,12 @@ def generate_validation_report(*, input_dir: str, outdir: str) -> Dict[str, Any]
     )
     _write_tsv(out / "validation_master_summary.tsv", master_rows)
 
-    empirical_counts = Counter(row.get("identifiability_extent", "") for row in empirical_rows)
-    synthetic_counts = Counter(row.get("identifiability_extent", "") for row in synthetic_rows)
+    empirical_counts = Counter(
+        row.get("ceii_gene_class", row.get("identifiability_extent", "")) for row in empirical_rows
+    )
+    synthetic_counts = Counter(
+        row.get("ceii_gene_class", row.get("identifiability_extent", "")) for row in synthetic_rows
+    )
     empirical_sig_counts = Counter(row.get("significance_label", "") for row in empirical_rows)
     synthetic_sig_counts = Counter(row.get("significance_label", "") for row in synthetic_rows)
 

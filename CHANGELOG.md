@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Locked `D_obs` definition to a single statistic:
+  sample variance (`ddof=1`) of `site_logit_mean` across codon sites.
+- Added empirical cEII calibration framework:
+  - truth-aware recoverability targets (`R_gene`, `R_site`) and binary labels (`I_gene`, `I_site`)
+  - isotonic calibration to `ceii_gene` / `ceii_site`
+  - calibration-versioned decision bands derived from held-out data
+- Added packaged calibration asset `babappai/data/ceii_calibration_v1.json`.
+- Extended runtime/API outputs with calibrated identifiability fields:
+  - `eii_z_raw`, `eii_01_raw`
+  - `ceii_gene`, `ceii_site`
+  - `ceii_gene_class`, `ceii_site_class`
+  - `ceii_ci`
+  - `calibration_version`, `domain_shift_or_applicability`
+- Added end-to-end calibration orchestration script:
+  `scripts/run_ceii_calibration_benchmark.py`
+  plus fitting utility `scripts/fit_ceii_calibration.py`.
+- Updated manuscript and docs to separate:
+  raw EII magnitude, calibrated cEII probability, and matched-neutral q-based significance.
 - Build metadata now uses a single source of truth for versioning via
   `babappai.metadata.SOFTWARE_VERSION`.
 - Added version integrity tests to enforce agreement between runtime version,

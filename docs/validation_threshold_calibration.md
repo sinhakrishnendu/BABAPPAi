@@ -2,8 +2,9 @@
 
 This workflow validates BABAPPAi in two explicitly separated layers:
 
-1. **Diagnostic layer**: `EII_z`, `EII_01` (recoverability magnitude)
-2. **Inferential layer**: `p_emp`, `q_emp`, `significant_bool` (empirical significance under matched neutral calibration)
+1. **Raw diagnostic layer**: `eii_z_raw`, `eii_01_raw` (dispersion magnitude)
+2. **Empirical identifiability layer**: `ceii_gene`, `ceii_site` and cEII classes
+3. **Inferential significance layer**: `p_emp`, `q_emp`, `significant_bool` (matched-neutral exceedance)
 
 ## Core significance definition
 
@@ -22,18 +23,20 @@ Across tested genes:
 
 ## What is evaluated
 
+- cEII reliability and calibration quality (Brier, ECE, reliability bins)
+- cEII operating characteristics on held-out test/OOD splits
 - neutral p-value calibration diagnostics (`p_emp` histogram and QQ)
 - q-based operating characteristics:
   - neutral significant rate (empirical FPR proxy)
   - regime-specific significant rates (low/medium/high)
   - q-based FPR, TPR, balanced accuracy
-- EII threshold metrics are retained only as descriptive legacy comparison
+- raw EII threshold summaries are retained only as legacy descriptive comparison
 - sigma calibration diagnostics:
   - `sigma0_raw` vs `sigma0_final`
   - floor usage fraction
   - fallback usage fraction
 
-## Main script
+## Main Scripts
 
 ```bash
 python scripts/run_full_pipeline_validation.py \
@@ -48,6 +51,18 @@ python scripts/run_full_pipeline_validation.py \
   --seed 123
 ```
 
+```bash
+python scripts/run_ceii_calibration_benchmark.py \
+  --outdir results/validation/ceii_benchmark_v1 \
+  --n-per-regime 12 \
+  --n-replicates-per-scenario 2 \
+  --pvalue-mode frozen_reference \
+  --bootstrap-reps 150 \
+  --write-package-asset
+```
+
 ## Reporting guardrail
 
-Significance is interpreted as **excess branch-site dispersion relative to the matched neutral simulator**. It is not interpreted as direct proof of adaptive substitution.
+`ceii_*` is interpreted as simulator-conditional recoverability probability.
+`q_emp` is interpreted as **excess branch-site dispersion relative to the matched neutral simulator**.
+Neither is interpreted as direct proof of adaptive substitution.

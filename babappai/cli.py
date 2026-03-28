@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from babappai import __version__
+from babappai.calibration import default_calibration_asset_path, load_calibration_asset
 from babappai.calibration.neutral_generator_adapter import run_neutral_generator
 from babappai.metadata import (
     MODEL_COMPATIBILITY_NOTE,
@@ -80,6 +81,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             pvalue_mode=args.pvalue_mode,
             retain_eii_bands=args.retain_eii_bands,
             report_threshold_bands=args.report_threshold_bands,
+            ceii_enabled=args.ceii_enabled,
+            ceii_asset_path=args.ceii_asset,
             min_neutral_group_size=args.min_neutral_group_size,
             neutral_reps=args.neutral_reps,
             neutral_generator_metadata=neutral_meta,
@@ -240,10 +243,16 @@ def cmd_example_write(args: argparse.Namespace) -> int:
 
 def cmd_version(args: argparse.Namespace) -> int:
     status = model_status()
+    calibration_version = "unavailable"
+    try:
+        calibration_version = str(load_calibration_asset(args.ceii_asset).get("calibration_version", "unknown"))
+    except Exception:
+        pass
     print(f"software_name={SOFTWARE_NAME}")
     print(f"software_version={__version__}")
     print(f"model_tag={MODEL_TAG}")
     print(f"model_doi={MODEL_DOI}")
+    print(f"calibration_version={calibration_version}")
     print("model_cached=" + ("yes" if status["cached"] else "no"))
     print("compatibility_note=" + MODEL_COMPATIBILITY_NOTE)
     return 0
@@ -387,6 +396,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--report-threshold-bands", dest="report_threshold_bands", action="store_true")
     run_parser.add_argument("--no-report-threshold-bands", dest="report_threshold_bands", action="store_false")
     run_parser.set_defaults(report_threshold_bands=True)
+    run_parser.add_argument("--ceii-enabled", dest="ceii_enabled", action="store_true")
+    run_parser.add_argument("--no-ceii-enabled", dest="ceii_enabled", action="store_false")
+    run_parser.set_defaults(ceii_enabled=True)
+    run_parser.add_argument(
+        "--ceii-asset",
+        default=str(default_calibration_asset_path()),
+        help="Path to cEII calibration asset JSON.",
+    )
     run_parser.add_argument("--offline", action="store_true")
     run_parser.add_argument("--quiet", action="store_true")
     run_parser.add_argument("--overwrite", action="store_true")
@@ -416,6 +433,11 @@ def build_parser() -> argparse.ArgumentParser:
     example_write.set_defaults(func=cmd_example_write)
 
     version_parser = subparsers.add_parser("version", help="Print software/model compatibility version info")
+    version_parser.add_argument(
+        "--ceii-asset",
+        default=str(default_calibration_asset_path()),
+        help="Optional cEII calibration asset path for reporting calibration_version.",
+    )
     version_parser.set_defaults(func=cmd_version)
 
     validate_parser = subparsers.add_parser(

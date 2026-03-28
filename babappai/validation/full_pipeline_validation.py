@@ -1,8 +1,8 @@
-"""Full-pipeline empirical validation utilities for EII threshold calibration.
+"""Full-pipeline empirical validation utilities for cEII calibration.
 
-This module extends BABAPPAi validation without altering core inference logic.
-It treats EII as a diagnostic of recoverability/identifiability, not direct proof
-of adaptation.
+The validation stack treats raw EII as a dispersion magnitude diagnostic and
+calibrates identifiability on held-out simulator truth. It does not treat EII
+or q-values as direct proof of adaptive substitution.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ RATE_HETEROGENEITY_BINS: Dict[str, float] = {
     "high": 0.70,
 }
 
-DEFAULT_DISPERSION_CHOICES = ("site_logit_variance", "site_score_variance")
+DEFAULT_DISPERSION_CHOICES = ("site_logit_variance",)
 
 
 @dataclass(frozen=True)
@@ -424,6 +424,14 @@ def simulate_alignment_validation_dataset(
         raise ValueError("n_per_regime must be > 0.")
     if n_replicates_per_scenario <= 0:
         raise ValueError("n_replicates_per_scenario must be > 0.")
+    if not dispersion_choices:
+        raise ValueError("dispersion_choices must be non-empty.")
+    unsupported = [x for x in dispersion_choices if x != "site_logit_variance"]
+    if unsupported:
+        raise ValueError(
+            "Only 'site_logit_variance' is supported for D_obs in the locked method. "
+            f"Unsupported values: {sorted(set(unsupported))}"
+        )
 
     out = Path(outdir).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -504,6 +512,21 @@ def simulate_alignment_validation_dataset(
                 if int(latent_matrix[idx].sum()) > 0
             ]
             active_site_count = int(np.any(latent_matrix > 0, axis=0).sum())
+            branch_names = [name for _, name in branch_rows]
+            site_burden_true = latent_matrix.mean(axis=0).astype(float)
+            branch_burden_true = latent_matrix.mean(axis=1).astype(float)
+            active_site_indicator = (site_burden_true > 0).astype(np.int8)
+            active_branch_indicator = (branch_burden_true > 0).astype(np.int8)
+            latent_truth_npz = scenario_dir / "latent_truth.npz"
+            np.savez_compressed(
+                latent_truth_npz,
+                branch_site_matrix_true=latent_matrix.astype(np.int8),
+                site_burden_true=site_burden_true,
+                branch_burden_true=branch_burden_true,
+                active_site_indicator=active_site_indicator,
+                active_branch_indicator=active_branch_indicator,
+                branch_names=np.asarray(branch_names, dtype=str),
+            )
 
             scenario_payload = {
                 **spec.__dict__,
@@ -513,6 +536,7 @@ def simulate_alignment_validation_dataset(
                 "active_branch_count": len(active_branch_names),
                 "active_site_count": active_site_count,
                 "latent_cell_fraction_realized": float(latent_matrix.mean()),
+                "latent_truth_npz_path": str(latent_truth_npz),
             }
             _write_json(scenario_dir / "scenario_metadata.json", scenario_payload)
             scenario_rows.append(scenario_payload)
@@ -567,6 +591,7 @@ def simulate_alignment_validation_dataset(
                     "active_site_count": active_site_count,
                     "latent_cell_fraction_realized": float(latent_matrix.mean()),
                     "active_branch_names": active_branch_names,
+                    "latent_truth_npz_path": str(latent_truth_npz),
                     "nuisance_bins": {
                         "gene_length_bin": spec.gene_length_bin,
                         "tree_bin": spec.tree_bin,
@@ -604,6 +629,7 @@ def simulate_alignment_validation_dataset(
                         "latent_cell_fraction_realized": float(latent_matrix.mean()),
                         "active_branch_count": len(active_branch_names),
                         "active_site_count": active_site_count,
+                        "latent_truth_npz_path": str(latent_truth_npz),
                         "stratum_id": "|".join(
                             [
                                 spec.gene_length_bin,
@@ -674,11 +700,13 @@ def _compute_dispersion_from_site_summary(site_summary_path: Path, mode: str) ->
     if len(site_scores) <= 1:
         return 0.0
 
-    if mode == "site_logit_variance":
-        return float(np.var(np.asarray(site_logits), ddof=1))
-    if mode == "site_score_variance":
-        return float(np.var(np.asarray(site_scores), ddof=1))
-    raise ValueError(f"Unsupported dispersion statistic: {mode}")
+    if mode != "site_logit_variance":
+        raise ValueError(
+            "Unsupported dispersion statistic: "
+            f"{mode}. BABAPPAi now locks D_obs to sample variance (ddof=1) "
+            "of site_logit_mean across codon sites."
+        )
+    return float(np.var(np.asarray(site_logits), ddof=1))
 
 
 def _coerce_finite_float(value: Any, *, field: str, run_label: str) -> float:
@@ -779,7 +807,12 @@ def run_full_pipeline_inference_on_dataset(
 
         gene = payload["gene_summary"]
         site_summary_path = run_out / "site_summary.tsv"
-        requested_dispersion = row.get("dispersion_statistic", "site_logit_variance")
+        requested_dispersion = "site_logit_variance"
+        if row.get("dispersion_statistic") not in (None, "", "site_logit_variance"):
+            raise RuntimeError(
+                f"{run_label}: unsupported dispersion_statistic `{row.get('dispersion_statistic')}`. "
+                "Locked method requires site_logit_variance."
+            )
         d_obs_requested = _compute_dispersion_from_site_summary(site_summary_path, requested_dispersion)
 
         d_obs = _coerce_finite_float(
@@ -839,7 +872,7 @@ def run_full_pipeline_inference_on_dataset(
         q_emp = _coerce_optional_float(gene.get("q_emp"))
         significant_bool = int(bool(gene.get("significant_bool")))
         significance_label = str(gene.get("significance_label") or "not_significant")
-        requested_matches_calibration = int(requested_dispersion == "site_logit_variance")
+        requested_matches_calibration = 1
 
         inference_rows.append(
             {
@@ -856,13 +889,23 @@ def run_full_pipeline_inference_on_dataset(
                 "floored_sigma0": sigma0,
                 "EII_z": eii_z,
                 "EII_01": _coerce_finite_float(gene.get("EII_01"), field="EII_01", run_label=run_label),
+                "eii_z_raw": _coerce_finite_float(gene.get("eii_z_raw", eii_z), field="eii_z_raw", run_label=run_label),
+                "eii_01_raw": _coerce_finite_float(gene.get("eii_01_raw", gene.get("EII_01")), field="eii_01_raw", run_label=run_label),
+                "ceii_gene": _coerce_optional_float(gene.get("ceii_gene")),
+                "ceii_site": _coerce_optional_float(gene.get("ceii_site")),
+                "ceii_gene_class": str(gene.get("ceii_gene_class") or ""),
+                "ceii_site_class": str(gene.get("ceii_site_class") or ""),
+                "ceii_gene_identifiable_bool": int(bool(gene.get("ceii_gene_identifiable_bool"))),
+                "ceii_site_identifiable_bool": int(bool(gene.get("ceii_site_identifiable_bool"))),
+                "calibration_version": str(gene.get("calibration_version") or ""),
+                "domain_shift_or_applicability": str(gene.get("domain_shift_or_applicability") or ""),
                 "p_emp": p_emp,
                 "q_emp": q_emp,
                 "alpha_used": float(alpha),
                 "significant_bool": significant_bool,
                 "significance_label": significance_label,
-                "identifiable_bool": int(bool(gene["identifiable_bool"])),
-                "identifiability_extent": str(gene["identifiability_extent"]),
+                "identifiable_bool": int(bool(gene.get("ceii_gene_identifiable_bool", gene["identifiable_bool"]))),
+                "identifiability_extent": str(gene.get("ceii_gene_class", gene["identifiability_extent"])),
                 "gene_burden_score": _site_summary_mean_score(site_summary_path),
                 "calibration_group": calibration_group,
                 "calibration_source": calibration_source,

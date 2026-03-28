@@ -46,7 +46,10 @@ jobs:
         run: pytest -q
 
       - name: CLI help smoke test
-        run: python -m babappai.cli --help
+        run: |
+          python -m babappai.cli --help
+          python -m babappai.cli run --help
+          python scripts/run_ceii_calibration_benchmark.py --help
 
   build:
     runs-on: ubuntu-latest

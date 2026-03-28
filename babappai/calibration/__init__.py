@@ -1,4 +1,4 @@
-"""BABAPPAi neutral calibration utilities and adapters."""
+"""BABAPPAi calibration utilities."""
 
 from __future__ import annotations
 
@@ -98,3 +98,24 @@ __all__ = [
     "load_neutral_reference",
     "lookup_interpolated",
 ]
+
+# cEII calibration helpers are imported lazily for backward compatibility.
+try:  # pragma: no cover - import availability is validated in dedicated tests.
+    from babappai.calibration.ceii import (
+        D_OBS_DEFINITION,
+        apply_ceii_calibration,
+        default_calibration_asset_path,
+        load_calibration_asset,
+    )
+
+    __all__.extend(
+        [
+            "D_OBS_DEFINITION",
+            "apply_ceii_calibration",
+            "default_calibration_asset_path",
+            "load_calibration_asset",
+        ]
+    )
+except Exception:
+    # Keep neutral-reference calibration available even if cEII module import fails.
+    pass

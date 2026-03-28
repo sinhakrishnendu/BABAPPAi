@@ -23,5 +23,12 @@ def test_regime_boundaries():
 
 def test_interpret_identifiability_fields():
     result = interpret_identifiability(1.7)
-    assert set(result.keys()) == {"EII_01", "identifiable_bool", "identifiability_extent", "eii_band_descriptive_only"}
+    assert set(result.keys()) == {
+        "EII_01",
+        "identifiable_bool",
+        "identifiability_extent",
+        "eii_band_descriptive_only",
+        "threshold_source",
+        "threshold_values",
+    }
     assert isinstance(result["identifiable_bool"], bool)

@@ -19,18 +19,18 @@ def _regime_explanation(regime: str) -> str:
     mapping = {
         "not_identifiable": (
             "Current data do not support reliable episodic branch-site "
-            "identifiability at the gene level."
+            "identifiability at the gene level within the calibrated simulation domain."
         ),
         "weak_or_ambiguous": (
-            "Signal is present but ambiguous; interpret as exploratory and seek "
-            "additional sequence depth or broader taxon sampling."
+            "Calibrated probability indicates ambiguous recoverability; interpret as "
+            "exploratory and seek additional sequence depth or broader taxon sampling."
         ),
         "identifiable": (
-            "The gene-level pattern is measurably identifiable under the chosen "
+            "The gene-level pattern is measurably identifiable under the empirical "
             "calibration regime."
         ),
         "strongly_identifiable": (
-            "The gene-level pattern is strongly identifiable under the chosen "
+            "The gene-level pattern is strongly identifiable under the empirical "
             "calibration regime."
         ),
     }
@@ -57,15 +57,22 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     results = _load_results(result_input)
 
     gene = results.get("gene_summary") or results.get("gene_level_identifiability", {})
-    eii_z = gene.get("EII_z")
-    eii_01 = gene.get("EII_01")
+    eii_z_raw = gene.get("eii_z_raw", gene.get("EII_z"))
+    eii_01_raw = gene.get("eii_01_raw", gene.get("EII_01"))
+    ceii_gene = gene.get("ceii_gene")
+    ceii_site = gene.get("ceii_site")
+    ceii_gene_class = gene.get("ceii_gene_class", gene.get("identifiability_extent"))
+    ceii_site_class = gene.get("ceii_site_class", "unavailable")
+    ceii_ci = gene.get("ceii_ci", {})
+    calibration_version = gene.get("calibration_version", "unknown")
+    applicability = gene.get("domain_shift_or_applicability", "unknown")
     p_emp = gene.get("p_emp")
     q_emp = gene.get("q_emp")
     alpha_used = gene.get("alpha_used")
     significant_bool = gene.get("significant_bool")
     significance_label = gene.get("significance_label")
-    identifiable = gene.get("identifiable_bool")
-    extent = gene.get("identifiability_extent")
+    identifiable = gene.get("ceii_gene_identifiable_bool", gene.get("identifiable_bool"))
+    extent = ceii_gene_class
 
     branch_results = _sorted_branch_rows(results.get("branch_results", []))
     site_results = _sorted_site_rows(results.get("site_results", []))
@@ -85,10 +92,22 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
             f"Significant at q <= {float(alpha_used):.2f}: "
             f"{'YES' if bool(significant_bool) else 'NO'} ({significance_label})"
         )
-    lines.append(f"Gene-level EII_z: {float(eii_z):.3f}")
-    lines.append(f"Gene-level EII_01: {float(eii_01):.3f}")
-    lines.append(f"Descriptive EII band: {extent}")
-    lines.append(f"Legacy identifiable_bool (descriptive): {'YES' if identifiable else 'NO'}")
+    lines.append(f"Gene-level raw EII_z: {float(eii_z_raw):.3f}")
+    lines.append(f"Gene-level raw EII_01: {float(eii_01_raw):.3f}")
+    lines.append(f"cEII_gene (P[gene identifiable]): {float(ceii_gene):.3f}" if ceii_gene is not None else "cEII_gene: n/a")
+    lines.append(f"cEII_site (P[site identifiable]): {float(ceii_site):.3f}" if ceii_site is not None else "cEII_site: n/a")
+    if isinstance(ceii_ci, Mapping):
+        gene_ci = ceii_ci.get("gene", {})
+        if isinstance(gene_ci, Mapping):
+            lo = gene_ci.get("lower")
+            hi = gene_ci.get("upper")
+            if lo is not None and hi is not None:
+                lines.append(f"cEII_gene CI: [{float(lo):.3f}, {float(hi):.3f}]")
+    lines.append(f"cEII gene class: {extent}")
+    lines.append(f"cEII site class: {ceii_site_class}")
+    lines.append(f"cEII gene identifiable at calibrated threshold: {'YES' if bool(identifiable) else 'NO'}")
+    lines.append(f"Calibration version: {calibration_version}")
+    lines.append(f"Applicability/domain flag: {applicability}")
     lines.append(_regime_explanation(str(extent)))
     lines.append("")
 
@@ -116,16 +135,15 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
         lines.append("No site-level rows available.")
     lines.append("")
 
-    lines.append("Interpretation Policy (Descriptive Bands)")
+    lines.append("Interpretation Policy")
     lines.append("-" * 60)
-    lines.append("0.00 <= EII_01 < 0.30  -> not_identifiable")
-    lines.append("0.30 <= EII_01 < 0.70  -> weak_or_ambiguous")
-    lines.append("0.70 <= EII_01 < 0.90  -> identifiable")
-    lines.append("0.90 <= EII_01 <= 1.00 -> strongly_identifiable")
+    lines.append("raw EII_z / EII_01 are dispersion magnitude diagnostics.")
+    lines.append("cEII_gene / cEII_site are empirically calibrated probabilities of recoverability.")
+    lines.append("cEII class labels are derived from the loaded calibration asset, not fixed constants.")
     lines.append("")
     lines.append(
         "Inferential significance is based on empirical p_emp/q_emp from matched neutral calibration; "
-        "EII bands are reporting-only."
+        "this is distinct from cEII probability calibration."
     )
     lines.append(
         "Warning: significance indicates excess dispersion relative to matched neutral expectation, "

@@ -10,8 +10,9 @@ It is a diagnostic framework for branch-site recoverability/identifiability unde
 
 BABAPPAi reports:
 
-- effect-size style recoverability diagnostics: `EII_z`, `EII_01`
-- empirical calibration significance: `p_emp`, `q_emp`, `significant_bool`
+- raw dispersion diagnostics: `eii_z_raw`, `eii_01_raw`
+- empirically calibrated identifiability probabilities: `ceii_gene`, `ceii_site`
+- empirical matched-neutral significance: `p_emp`, `q_emp`, `significant_bool`
 
 BABAPPAi does **not** perform classical dN/dS likelihood-ratio testing, and significance does **not** prove adaptive substitution.
 
@@ -34,17 +35,25 @@ babappai run --alignment demo/aln.fasta --tree demo/tree.nwk --outdir demo_out
 For each gene-level run:
 
 - `D_obs`: observed dispersion statistic
+: sample variance (`ddof=1`) of site-level `site_logit_mean` across codon sites
 - `mu0`: matched neutral mean
 - `sigma0_raw`: raw neutral SD
 - `sigma0_final`: SD after floor application
-- `EII_z = (D_obs - mu0) / sigma0_final`
-- `EII_01 = sigmoid(EII_z)` (diagnostic magnitude scale)
+- `eii_z_raw = (D_obs - mu0) / sigma0_final`
+- `eii_01_raw = sigmoid(eii_z_raw)` (diagnostic magnitude scale)
+- `ceii_gene`: calibrated `P(I_gene=1 | data)`
+- `ceii_site`: calibrated `P(I_site=1 | data)`
+- `ceii_gene_class`, `ceii_site_class`: calibration-derived decision bands
+- `ceii_ci`: bootstrap calibration interval (if calibration asset provides it)
+- `calibration_version`, `domain_shift_or_applicability`
 - `p_emp = (1 + count(D0 >= D_obs)) / (M + 1)` from matched neutral replicates
 - `q_emp`: BH-adjusted `p_emp` across tested genes in an analysis set
 - `significant_bool = (q_emp <= alpha)` (default `alpha=0.05`)
 - `significance_label ∈ {not_significant, significant}`
 
-EII bands are retained for descriptive reporting only and are deprecated as inferential decision rules.
+`ceii_*` and `q_emp` are intentionally distinct layers:
+- `ceii_*`: recoverability/identifiability probability calibration
+- `q_emp`: excess-dispersion significance under matched-neutral calibration
 
 ## 5) Core CLI
 
@@ -56,6 +65,7 @@ babappai model status
 babappai model verify
 babappai doctor
 babappai version
+babappai version --ceii-asset babappai/data/ceii_calibration_v1.json
 ```
 
 ### Significance-related options
@@ -67,6 +77,8 @@ babappai version
 - `--sigma-floor`
 - `--retain-eii-bands` / `--no-retain-eii-bands`
 - `--report-threshold-bands` / `--no-report-threshold-bands`
+- `--ceii-enabled` / `--no-ceii-enabled`
+- `--ceii-asset`
 
 ## 6) Validation workflows
 
@@ -96,6 +108,18 @@ python scripts/run_full_pipeline_validation.py \
   --neutral_reps 200 \
   --sigma_floor 0.05 \
   --seed 123
+```
+
+cEII benchmark + calibration helper:
+
+```bash
+python scripts/run_ceii_calibration_benchmark.py \
+  --outdir results/validation/ceii_benchmark_v1 \
+  --n-per-regime 12 \
+  --n-replicates-per-scenario 2 \
+  --pvalue-mode frozen_reference \
+  --bootstrap-reps 150 \
+  --write-package-asset
 ```
 
 ## 7) Output files

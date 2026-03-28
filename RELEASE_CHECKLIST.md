@@ -4,15 +4,20 @@
 
 1. Confirm target version in `babappai/metadata.py` and `CHANGELOG.md`.
 2. Confirm `CITATION.cff` version matches release version.
-3. Run local checks:
+3. Confirm calibration asset version/provenance:
+   - `babappai/data/ceii_calibration_v1.json` exists
+   - `calibration_version` and threshold bands are intentional for this release
+   - `D_obs` definition in asset matches locked method
+4. Run local checks:
    - `ruff check .`
    - `pytest -q`
    - `python -m build --sdist --wheel`
    - `python -m twine check dist/*`
-4. Smoke-install from wheel:
+5. Smoke-install from wheel:
    - `python -m pip install dist/*.whl`
    - `python -m babappai.cli --help`
    - `python -m babappai.cli version`
+   - `python -m babappai.cli run --help` (confirm cEII CLI options are present)
 
 ## GitHub Actions / PyPI
 
@@ -29,5 +34,6 @@
 2. Verify CLI:
    - `babappai --help`
    - `babappai version`
+   - `babappai run --alignment <...> --tree <...> --outdir <...>` includes `ceii_*` fields
 3. Confirm PyPI metadata rendering and links.
 4. Confirm citation metadata (`CITATION.cff`) is present and correct.

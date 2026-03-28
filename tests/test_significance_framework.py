@@ -85,6 +85,39 @@ def test_inference_empirical_significance_and_sigma_floor(monkeypatch):
         "monte_carlo_neutral",
         lambda **kwargs: (mu0, sd0, neutral),
     )
+    monkeypatch.setattr(
+        inference,
+        "load_calibration_asset",
+        lambda *_args, **_kwargs: {
+            "calibration_version": "ceii_test",
+            "gene_calibrator": {"x": [-3.0, 0.0, 3.0], "y": [0.1, 0.5, 0.9]},
+            "site_calibrator": {"x": [-3.0, 0.0, 3.0], "y": [0.05, 0.4, 0.8]},
+            "thresholds": {
+                "gene": {"threshold": 0.6},
+                "site": {"threshold": 0.65},
+            },
+            "classes": {
+                "gene": [
+                    {"label": "not_identifiable", "min": 0.0, "max": 0.4},
+                    {"label": "weak_or_ambiguous", "min": 0.4, "max": 0.6},
+                    {"label": "identifiable", "min": 0.6, "max": 0.8},
+                    {"label": "strongly_identifiable", "min": 0.8, "max": 1.0},
+                ],
+                "site": [
+                    {"label": "not_identifiable", "min": 0.0, "max": 0.4},
+                    {"label": "weak_or_ambiguous", "min": 0.4, "max": 0.65},
+                    {"label": "identifiable", "min": 0.65, "max": 0.8},
+                    {"label": "strongly_identifiable", "min": 0.8, "max": 1.0},
+                ],
+            },
+            "applicability": {
+                "min_n_taxa": 2,
+                "max_n_taxa": 128,
+                "min_gene_length_nt": 3,
+                "max_gene_length_nt": 10000,
+            },
+        },
+    )
 
     result = inference.run_inference(
         alignment_path="dummy.fasta",
@@ -104,3 +137,7 @@ def test_inference_empirical_significance_and_sigma_floor(monkeypatch):
     assert float(gene["sigma0_final"]) >= 0.05
     assert abs(float(gene["sigma0_final"]) - float(gene["neutral_sd"])) < 1e-12
     assert bool(gene["significant_bool"]) == (float(gene["q_emp"]) <= 0.05)
+    assert float(gene["EII_z"]) == float(gene["eii_z_raw"])
+    assert 0.0 <= float(gene["eii_01_raw"]) <= 1.0
+    assert 0.0 <= float(gene["ceii_gene"]) <= 1.0
+    assert gene["identifiability_extent"] == gene["ceii_gene_class"]

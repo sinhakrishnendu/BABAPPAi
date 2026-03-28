@@ -6,8 +6,20 @@ def _fake_payload():
         "gene_summary": {
             "EII_z": 1.84,
             "EII_01": 0.86,
-            "identifiable_bool": True,
-            "identifiability_extent": "identifiable",
+            "eii_z_raw": 1.84,
+            "eii_01_raw": 0.86,
+            "ceii_gene": 0.82,
+            "ceii_site": 0.61,
+            "ceii_gene_class": "identifiable",
+            "ceii_site_class": "weak_or_ambiguous",
+            "ceii_gene_identifiable_bool": True,
+            "ceii_site_identifiable_bool": False,
+            "calibration_version": "ceii_v1",
+            "domain_shift_or_applicability": "in_domain",
+            "p_emp": 0.03,
+            "q_emp": 0.04,
+            "alpha_used": 0.05,
+            "significant_bool": True,
         },
         "branch_results": [
             {"branch": "taxonA", "background_score": 0.9},
@@ -75,7 +87,7 @@ def test_run_command(monkeypatch, tmp_path, capsys):
     )
     assert code == 0
     out = capsys.readouterr().out
-    assert "Gene-level EII_z" in out
+    assert "Gene-level raw EII_z" in out
     assert "Significant at alpha=" in out
 
 
