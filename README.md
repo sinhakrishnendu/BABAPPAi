@@ -1,5 +1,8 @@
 # BABAPPAi (`babappai`)
 
+[![CI](https://github.com/krishnendusinha/babappai/actions/workflows/ci.yml/badge.svg)](https://github.com/krishnendusinha/babappai/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 BABAPPAi is the renamed continuation of the BABAPPAΩ codebase.
 It is a diagnostic framework for branch-site recoverability/identifiability under matched neutral calibration.
 
@@ -124,7 +127,18 @@ Validation runs add calibration/significance tables, bootstrap summaries, figure
 
 ```bash
 pip install -e .[test]
+pip install ruff build twine
+ruff check .
 pytest
 python -m build --sdist --wheel
 python -m twine check dist/*
 ```
+
+## 11) Reproducibility and project policy
+
+- large generated outputs policy: `docs/reproducibility_artifacts.md`
+- citation metadata: `CITATION.cff`
+- contribution guidelines: `CONTRIBUTING.md`
+- code of conduct: `CODE_OF_CONDUCT.md`
+- security reporting: `SECURITY.md`
+- maintainer release process: `RELEASE_CHECKLIST.md`

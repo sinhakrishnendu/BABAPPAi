@@ -2019,7 +2019,7 @@ def generate_manuscript_outputs(
 
     release_notes_text = "\n".join(
         [
-            "# BABAPPAi 2.1.0 Validation Release Notes",
+            "# BABAPPAi 1.1.0 Validation Release Notes",
             "",
             "- Primary inferential decision layer now uses empirical Monte Carlo p-values and BH-adjusted q-values.",
             "- EII metrics remain diagnostic effect-size style outputs.",

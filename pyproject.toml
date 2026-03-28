@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "babappai"
-version = "1.1.0"
 description = "BABAPPAi: diagnostic framework for identifiability of episodic branch-site structure"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [{ name = "Krishnendu Sinha" }]
+dynamic = ["version"]
 
 dependencies = [
   "torch>=2.0",
@@ -38,6 +38,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent"
 ]
 
@@ -56,6 +57,8 @@ dev = [
 Homepage = "https://github.com/krishnendusinha/babappai"
 Documentation = "https://github.com/krishnendusinha/babappai"
 Source = "https://github.com/krishnendusinha/babappai"
+Issues = "https://github.com/krishnendusinha/babappai/issues"
+Changelog = "https://github.com/krishnendusinha/babappai/blob/main/CHANGELOG.md"
 LegacySoftwareDOI = "https://doi.org/10.5281/zenodo.18520163"
 LegacyModelDOI = "https://doi.org/10.5281/zenodo.18195869"
 
@@ -75,6 +78,9 @@ packages = [
   "babappaomega.data"
 ]
 
+[tool.setuptools.dynamic]
+version = { attr = "babappai.metadata.SOFTWARE_VERSION" }
+
 [tool.setuptools.package-data]
 babappai = [
   "py.typed",
@@ -90,3 +96,10 @@ babappaomega = [
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

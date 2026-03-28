@@ -1,6 +1,20 @@
 # Changelog
 
-## 2.1.0 - 2026-03-26
+## Unreleased
+
+- Build metadata now uses a single source of truth for versioning via
+  `babappai.metadata.SOFTWARE_VERSION`.
+- Added version integrity tests to enforce agreement between runtime version,
+  build metadata, and CLI-reported version.
+- Added CI and publish workflows with gated `test -> build -> publish` flow,
+  artifact validation, and wheel/sdist smoke-install checks.
+- Added governance and publication metadata files:
+  `CITATION.cff`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
+  and `RELEASE_CHECKLIST.md`.
+- Added reproducibility artifact policy and stopped tracking generated outputs
+  under `results/` for future commits.
+
+## 1.1.0 - 2026-03-26
 
 - Replaced threshold-centric inferential decision layer with an empirical significance framework:
   - empirical Monte Carlo `p_emp` from matched neutral exceedance
@@ -27,7 +41,7 @@
   - bootstrap summaries including q-based operating characteristics
 - Updated manuscript text, README, and validation docs to align with the new significance semantics.
 
-## 2.0.0 - 2026-03-25
+## 1.0.0 - 2026-03-25
 
 - Renamed the software ecosystem from **BABAPPAΩ** to **BABAPPAi**.
 - Canonical install/package/CLI are now `babappai`.
