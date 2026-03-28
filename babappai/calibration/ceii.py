@@ -17,7 +17,11 @@ D_OBS_DEFINITION = (
 
 
 def default_calibration_asset_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "data" / "ceii_calibration_v1.json"
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    v2 = data_dir / "ceii_calibration_v2.json"
+    if v2.exists():
+        return v2
+    return data_dir / "ceii_calibration_v1.json"
 
 
 def load_calibration_asset(path: Optional[str | Path] = None) -> Dict[str, Any]:
@@ -97,6 +101,143 @@ def predict_isotonic(calibrator: Mapping[str, Sequence[float]], x_new: Sequence[
         raise ValueError("Invalid isotonic calibrator payload.")
     query = np.asarray(x_new, dtype=float)
     return np.interp(query, x, y, left=float(y[0]), right=float(y[-1]))
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        fv = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(fv):
+        return None
+    return float(fv)
+
+
+def _build_feature_context(
+    *,
+    eii_z_raw: float,
+    n_taxa: int,
+    gene_length_nt: int,
+    n_branches: Optional[int],
+    extra_covariates: Optional[Mapping[str, float]],
+) -> Dict[str, float]:
+    ctx: Dict[str, float] = {
+        "eii_z_raw": float(eii_z_raw),
+        "eii_01_raw": float(1.0 / (1.0 + math.exp(-float(eii_z_raw)))),
+        "n_taxa": float(n_taxa),
+        "gene_length_nt": float(gene_length_nt),
+        "log1p_n_taxa": float(math.log1p(max(float(n_taxa), 0.0))),
+        "log1p_gene_length_nt": float(math.log1p(max(float(gene_length_nt), 0.0))),
+    }
+    if n_branches is not None:
+        ctx["n_branches"] = float(n_branches)
+        ctx["log1p_n_branches"] = float(math.log1p(max(float(n_branches), 0.0)))
+    if extra_covariates:
+        for key, value in extra_covariates.items():
+            fv = _safe_float(value)
+            if fv is None:
+                continue
+            k = str(key)
+            ctx[k] = float(fv)
+            if k.startswith("log1p_"):
+                continue
+            if fv >= -0.999999:
+                ctx[f"log1p_{k}"] = float(math.log1p(max(fv, 0.0)))
+    return ctx
+
+
+def _predict_linear_score(model: Mapping[str, Any], ctx: Mapping[str, float]) -> float:
+    feature_names = [str(x) for x in model.get("feature_names", [])]
+    coef = np.asarray(model.get("coef", []), dtype=float)
+    means = np.asarray(model.get("feature_mean", []), dtype=float)
+    scales = np.asarray(model.get("feature_scale", []), dtype=float)
+    intercept = float(model.get("intercept", 0.0))
+
+    if not feature_names or coef.size != len(feature_names):
+        raise ValueError("Invalid linear-score model payload.")
+    if means.size != len(feature_names) or scales.size != len(feature_names):
+        means = np.zeros(len(feature_names), dtype=float)
+        scales = np.ones(len(feature_names), dtype=float)
+
+    vals = []
+    for i, key in enumerate(feature_names):
+        default = float(means[i]) if i < means.size and np.isfinite(means[i]) else 0.0
+        v = _safe_float(ctx.get(key, default))
+        if v is None:
+            v = default
+        vals.append(v)
+    x = np.asarray(vals, dtype=float)
+    scale = np.where(np.abs(scales) > 1e-9, scales, 1.0)
+    z = (x - means) / scale
+    return float(intercept + np.dot(coef, z))
+
+
+def _logistic_prob(a: float, b: float, score: float) -> float:
+    z = float(np.clip(a * score + b, -60.0, 60.0))
+    return float(1.0 / (1.0 + math.exp(-z)))
+
+
+def _predict_target_probability(
+    *,
+    target: str,
+    asset: Mapping[str, Any],
+    eii_z_raw: float,
+    ctx: Mapping[str, float],
+) -> Tuple[float, float, float]:
+    model_key = f"{target}_model"
+    model = asset.get(model_key)
+    legacy_cal_key = f"{target}_calibrator"
+
+    # ceii_v2 style: linear-score model followed by isotonic calibration.
+    if isinstance(model, Mapping) and str(model.get("type", "")) == "linear_score_isotonic":
+        score = _predict_linear_score(model, ctx)
+        iso = model.get("isotonic_calibrator", {})
+        p_iso = float(predict_isotonic(iso, [score])[0])
+        logi = model.get("logistic_calibrator")
+        if isinstance(logi, Mapping):
+            p_log = _logistic_prob(
+                float(logi.get("a", 0.0)),
+                float(logi.get("b", 0.0)),
+                score,
+            )
+            w_iso = float(np.clip(float(model.get("blend_weight_isotonic", 0.5)), 0.0, 1.0))
+            p = float(np.clip(w_iso * p_iso + (1.0 - w_iso) * p_log, 0.0, 1.0))
+        else:
+            p = p_iso
+        ci_payload = model.get("prediction_ci", {})
+        if isinstance(ci_payload, Mapping) and ci_payload.get("lower") and ci_payload.get("upper"):
+            lo_iso = float(predict_isotonic(ci_payload["lower"], [score])[0])
+            hi_iso = float(predict_isotonic(ci_payload["upper"], [score])[0])
+            if isinstance(logi, Mapping):
+                p_log = _logistic_prob(
+                    float(logi.get("a", 0.0)),
+                    float(logi.get("b", 0.0)),
+                    score,
+                )
+                w_iso = float(np.clip(float(model.get("blend_weight_isotonic", 0.5)), 0.0, 1.0))
+                lo = float(np.clip(w_iso * lo_iso + (1.0 - w_iso) * p_log, 0.0, 1.0))
+                hi = float(np.clip(w_iso * hi_iso + (1.0 - w_iso) * p_log, 0.0, 1.0))
+            else:
+                lo = lo_iso
+                hi = hi_iso
+        else:
+            lo = p
+            hi = p
+        return p, lo, hi
+
+    # backward-compatible path: isotonic directly on eii_z_raw.
+    calibrator = asset.get(legacy_cal_key)
+    if not isinstance(calibrator, Mapping):
+        raise ValueError(f"Missing {legacy_cal_key} in calibration asset.")
+    p = float(predict_isotonic(calibrator, [eii_z_raw])[0])
+    ci_root = asset.get("prediction_ci", {})
+    if isinstance(ci_root, Mapping) and f"{target}_lower" in ci_root and f"{target}_upper" in ci_root:
+        lo = float(predict_isotonic(ci_root[f"{target}_lower"], [eii_z_raw])[0])
+        hi = float(predict_isotonic(ci_root[f"{target}_upper"], [eii_z_raw])[0])
+    else:
+        lo = p
+        hi = p
+    return p, lo, hi
 
 
 def brier_score(y_true: Sequence[int], p_pred: Sequence[float]) -> float:
@@ -238,37 +379,248 @@ def class_from_probability(
     return str(classes[-1]["label"])
 
 
+def _coerce_feature_envelope(applicability: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
+    """Return required feature envelope with legacy-asset compatibility."""
+    if isinstance(applicability.get("features"), Mapping):
+        out: Dict[str, Dict[str, float]] = {}
+        for key, spec in applicability["features"].items():
+            if not isinstance(spec, Mapping):
+                continue
+            if "min" not in spec or "max" not in spec:
+                continue
+            out[str(key)] = {"min": float(spec["min"]), "max": float(spec["max"])}
+        if out:
+            return out
+
+    # Legacy ceii_v1 compatibility.
+    return {
+        "n_taxa": {
+            "min": float(applicability.get("min_n_taxa", 0)),
+            "max": float(applicability.get("max_n_taxa", 10**9)),
+        },
+        "gene_length_nt": {
+            "min": float(applicability.get("min_gene_length_nt", 0)),
+            "max": float(applicability.get("max_gene_length_nt", 10**9)),
+        },
+    }
+
+
+def _normalized_outside_distance(value: float, lo: float, hi: float) -> float:
+    span = max(float(hi) - float(lo), 1.0)
+    if value < lo:
+        return float((lo - value) / span)
+    if value > hi:
+        return float((value - hi) / span)
+    return 0.0
+
+
+def _in_domain_boundary_proximity(value: float, lo: float, hi: float) -> float:
+    if value < lo or value > hi:
+        return 0.0
+    span = max(float(hi) - float(lo), 1.0)
+    left = float((value - lo) / span)
+    right = float((hi - value) / span)
+    return float(max(0.0, min(left, right)))
+
+
+def _nearest_supported_regime(
+    *,
+    features: Mapping[str, float],
+    applicability: Mapping[str, Any],
+    envelope: Mapping[str, Mapping[str, float]],
+) -> str:
+    regimes = applicability.get("supported_regimes", [])
+    if isinstance(regimes, Sequence) and regimes:
+        best_name = "unknown_regime"
+        best_distance = float("inf")
+        for row in regimes:
+            if not isinstance(row, Mapping):
+                continue
+            center = row.get("center", {})
+            if not isinstance(center, Mapping):
+                continue
+            dist_terms: List[float] = []
+            for key, env in envelope.items():
+                if key not in features or key not in center:
+                    continue
+                span = max(float(env["max"]) - float(env["min"]), 1.0)
+                dist_terms.append(((float(features[key]) - float(center[key])) / span) ** 2)
+            if not dist_terms:
+                continue
+            dist = float(math.sqrt(sum(dist_terms)))
+            if dist < best_distance:
+                best_distance = dist
+                best_name = str(row.get("name", best_name))
+        return best_name
+
+    ranges = ", ".join(
+        f"{k}=[{float(v['min']):g},{float(v['max']):g}]"
+        for k, v in envelope.items()
+    )
+    return f"envelope:{ranges}" if ranges else "envelope:unspecified"
+
+
+def evaluate_applicability(
+    *,
+    n_taxa: int,
+    gene_length_nt: int,
+    asset: Mapping[str, Any],
+    extra_covariates: Optional[Mapping[str, float]] = None,
+) -> Dict[str, Any]:
+    applicability = asset.get("applicability", {})
+    if not isinstance(applicability, Mapping):
+        applicability = {}
+
+    envelope = _coerce_feature_envelope(applicability)
+    features: Dict[str, float] = {
+        "n_taxa": float(n_taxa),
+        "gene_length_nt": float(gene_length_nt),
+    }
+    if extra_covariates:
+        for key, value in extra_covariates.items():
+            try:
+                fv = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(fv):
+                features[str(key)] = float(fv)
+
+    missing_required: List[str] = []
+    outside: Dict[str, float] = {}
+    boundary_proximity: Dict[str, float] = {}
+
+    for key, spec in envelope.items():
+        value = features.get(key)
+        if value is None or not np.isfinite(value):
+            missing_required.append(key)
+            continue
+        lo = float(spec["min"])
+        hi = float(spec["max"])
+        d_out = _normalized_outside_distance(float(value), lo, hi)
+        outside[key] = float(d_out)
+        boundary_proximity[key] = _in_domain_boundary_proximity(float(value), lo, hi)
+
+    near_boundary_fraction = float(applicability.get("near_boundary_fraction", 0.10))
+    min_score_for_calibration = float(applicability.get("min_applicability_score_for_calibration", 0.95))
+    allow_near_boundary = bool(applicability.get("allow_near_boundary_calibration", False))
+
+    if missing_required:
+        status = "out_of_domain"
+        within_envelope = False
+        distance = float("inf")
+        score = 0.0
+        reason = "missing_required_applicability_features:" + ",".join(sorted(missing_required))
+    else:
+        outside_terms = np.asarray(list(outside.values()), dtype=float)
+        outside_terms = outside_terms[np.isfinite(outside_terms)]
+        distance = float(np.linalg.norm(outside_terms)) if outside_terms.size > 0 else 0.0
+        within_envelope = bool(np.all(outside_terms <= 0.0))
+
+        if not within_envelope:
+            status = "out_of_domain"
+            score = float(np.exp(-2.0 * max(distance, 0.0)))
+            violated = [k for k, d in outside.items() if d > 0.0]
+            reason = "outside_supported_domain:" + ",".join(sorted(violated))
+        else:
+            min_boundary_prox = min(boundary_proximity.values()) if boundary_proximity else 1.0
+            if min_boundary_prox < near_boundary_fraction:
+                status = "near_boundary"
+                score = float(np.clip(min_boundary_prox / max(near_boundary_fraction, 1e-6), 0.0, 1.0))
+                reason = "near_boundary_of_supported_domain"
+            else:
+                status = "in_domain"
+                score = 1.0
+                reason = ""
+
+    should_calibrate = (
+        status == "in_domain"
+        and score >= min_score_for_calibration
+    )
+    if status == "near_boundary" and allow_near_boundary and score >= min_score_for_calibration:
+        should_calibrate = True
+
+    nearest_regime = _nearest_supported_regime(
+        features=features,
+        applicability=applicability,
+        envelope=envelope,
+    )
+    return {
+        "applicability_score": float(np.clip(score, 0.0, 1.0)),
+        "applicability_status": str(status),
+        "within_applicability_envelope": bool(within_envelope),
+        "distance_to_supported_domain": float(distance) if np.isfinite(distance) else None,
+        "nearest_supported_regime": nearest_regime,
+        "calibration_unavailable_reason": "" if should_calibrate else str(reason or "outside_or_low_applicability"),
+        "should_calibrate": bool(should_calibrate),
+        "domain_shift_or_applicability": str(status),
+    }
+
+
 def apply_ceii_calibration(
     *,
     eii_z_raw: float,
     n_taxa: int,
     gene_length_nt: int,
+    n_branches: Optional[int] = None,
+    extra_covariates: Optional[Mapping[str, float]] = None,
     asset: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    p_gene = float(predict_isotonic(asset["gene_calibrator"], [eii_z_raw])[0])
-    p_site = float(predict_isotonic(asset["site_calibrator"], [eii_z_raw])[0])
+    covars: Dict[str, float] = {}
+    if extra_covariates:
+        for k, v in extra_covariates.items():
+            fv = _safe_float(v)
+            if fv is not None:
+                covars[str(k)] = float(fv)
+    if n_branches is not None and np.isfinite(float(n_branches)):
+        covars["n_branches"] = float(n_branches)
+
+    applicability_meta = evaluate_applicability(
+        n_taxa=int(n_taxa),
+        gene_length_nt=int(gene_length_nt),
+        asset=asset,
+        extra_covariates=covars,
+    )
 
     thresholds = asset.get("thresholds", {})
     gene_thr = float(thresholds.get("gene", {}).get("threshold", 0.5))
     site_thr = float(thresholds.get("site", {}).get("threshold", 0.5))
     classes = asset.get("classes", {})
 
-    applicability = asset.get("applicability", {})
-    min_taxa = int(applicability.get("min_n_taxa", 0))
-    max_taxa = int(applicability.get("max_n_taxa", 10**9))
-    min_len = int(applicability.get("min_gene_length_nt", 0))
-    max_len = int(applicability.get("max_gene_length_nt", 10**9))
-    in_domain = (min_taxa <= int(n_taxa) <= max_taxa) and (min_len <= int(gene_length_nt) <= max_len)
+    if not bool(applicability_meta["should_calibrate"]):
+        return {
+            "ceii_gene": None,
+            "ceii_site": None,
+            "ceii_gene_class": "calibration_unavailable",
+            "ceii_site_class": "calibration_unavailable",
+            "ceii_gene_identifiable_bool": False,
+            "ceii_site_identifiable_bool": False,
+            "ceii_ci": {
+                "gene": {"lower": None, "upper": None},
+                "site": {"lower": None, "upper": None},
+            },
+            "calibration_version": str(asset.get("calibration_version", "unknown")),
+            **{k: v for k, v in applicability_meta.items() if k != "should_calibrate"},
+        }
 
-    ci = asset.get("prediction_ci", {})
-    if ci:
-        gene_low = float(predict_isotonic(ci["gene_lower"], [eii_z_raw])[0])
-        gene_high = float(predict_isotonic(ci["gene_upper"], [eii_z_raw])[0])
-        site_low = float(predict_isotonic(ci["site_lower"], [eii_z_raw])[0])
-        site_high = float(predict_isotonic(ci["site_upper"], [eii_z_raw])[0])
-    else:
-        gene_low = gene_high = p_gene
-        site_low = site_high = p_site
+    ctx = _build_feature_context(
+        eii_z_raw=float(eii_z_raw),
+        n_taxa=int(n_taxa),
+        gene_length_nt=int(gene_length_nt),
+        n_branches=n_branches,
+        extra_covariates=covars,
+    )
+    p_gene, gene_low, gene_high = _predict_target_probability(
+        target="gene",
+        asset=asset,
+        eii_z_raw=float(eii_z_raw),
+        ctx=ctx,
+    )
+    p_site, site_low, site_high = _predict_target_probability(
+        target="site",
+        asset=asset,
+        eii_z_raw=float(eii_z_raw),
+        ctx=ctx,
+    )
 
     return {
         "ceii_gene": p_gene,
@@ -287,14 +639,15 @@ def apply_ceii_calibration(
             "gene": {"lower": gene_low, "upper": gene_high},
             "site": {"lower": site_low, "upper": site_high},
         },
-        "domain_shift_or_applicability": "in_domain" if in_domain else "out_of_domain",
         "calibration_version": str(asset.get("calibration_version", "unknown")),
+        **{k: v for k, v in applicability_meta.items() if k != "should_calibrate"},
     }
 
 
 __all__ = [
     "D_OBS_DEFINITION",
     "apply_ceii_calibration",
+    "evaluate_applicability",
     "brier_score",
     "binary_metrics",
     "class_from_probability",

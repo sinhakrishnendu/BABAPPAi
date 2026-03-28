@@ -33,6 +33,10 @@ def _regime_explanation(regime: str) -> str:
             "The gene-level pattern is strongly identifiable under the empirical "
             "calibration regime."
         ),
+        "calibration_unavailable": (
+            "Calibrated identifiability probability is abstained because the sample "
+            "is outside or near the boundary of validated calibration support."
+        ),
     }
     return mapping.get(regime, "Interpretation regime unavailable.")
 
@@ -66,6 +70,12 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     ceii_ci = gene.get("ceii_ci", {})
     calibration_version = gene.get("calibration_version", "unknown")
     applicability = gene.get("domain_shift_or_applicability", "unknown")
+    applicability_score = gene.get("applicability_score")
+    applicability_status = gene.get("applicability_status", applicability)
+    within_envelope = gene.get("within_applicability_envelope")
+    calib_unavailable_reason = gene.get("calibration_unavailable_reason")
+    nearest_supported_regime = gene.get("nearest_supported_regime")
+    distance_to_supported_domain = gene.get("distance_to_supported_domain")
     p_emp = gene.get("p_emp")
     q_emp = gene.get("q_emp")
     alpha_used = gene.get("alpha_used")
@@ -108,6 +118,17 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     lines.append(f"cEII gene identifiable at calibrated threshold: {'YES' if bool(identifiable) else 'NO'}")
     lines.append(f"Calibration version: {calibration_version}")
     lines.append(f"Applicability/domain flag: {applicability}")
+    lines.append(f"Applicability status: {applicability_status}")
+    if applicability_score is not None:
+        lines.append(f"Applicability score: {float(applicability_score):.3f}")
+    if within_envelope is not None:
+        lines.append(f"Within applicability envelope: {'YES' if bool(within_envelope) else 'NO'}")
+    if nearest_supported_regime:
+        lines.append(f"Nearest supported regime: {nearest_supported_regime}")
+    if distance_to_supported_domain is not None:
+        lines.append(f"Distance to supported domain: {float(distance_to_supported_domain):.3f}")
+    if calib_unavailable_reason:
+        lines.append(f"Calibration unavailable reason: {calib_unavailable_reason}")
     lines.append(_regime_explanation(str(extent)))
     lines.append("")
 

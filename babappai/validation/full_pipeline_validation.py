@@ -78,15 +78,18 @@ REGIME_SPECS: Dict[str, Dict[str, float]] = {
 
 
 LENGTH_BINS: Dict[str, Tuple[int, int]] = {
-    "short": (240, 480),
-    "medium": (720, 1200),
-    "long": (1500, 2400),
+    "very_short": (120, 600),
+    "short": (600, 1200),
+    "medium": (1200, 2500),
+    "long": (2500, 4500),
 }
 
 TREE_BINS: Dict[str, Dict[str, float]] = {
     "small_shallow": {"n_taxa": 8, "depth_scale": 0.6},
     "medium": {"n_taxa": 16, "depth_scale": 1.0},
     "large_deep": {"n_taxa": 24, "depth_scale": 1.6},
+    "very_large": {"n_taxa": 40, "depth_scale": 1.9},
+    "ultra_large": {"n_taxa": 64, "depth_scale": 2.2},
 }
 
 RECOMBINATION_BINS: Dict[str, float] = {

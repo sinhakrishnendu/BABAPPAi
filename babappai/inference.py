@@ -359,16 +359,22 @@ def run_inference(
             f"{fallback_reason}; using sigma0={neutral_sd_floored:.6g}."
         )
     ceii_payload: Dict[str, Any] = {
-        "ceii_gene": float("nan"),
-        "ceii_site": float("nan"),
+        "ceii_gene": None,
+        "ceii_site": None,
         "ceii_gene_class": "calibration_unavailable",
         "ceii_site_class": "calibration_unavailable",
         "ceii_gene_identifiable_bool": False,
         "ceii_site_identifiable_bool": False,
         "ceii_ci": {
-            "gene": {"lower": float("nan"), "upper": float("nan")},
-            "site": {"lower": float("nan"), "upper": float("nan")},
+            "gene": {"lower": None, "upper": None},
+            "site": {"lower": None, "upper": None},
         },
+        "applicability_score": None,
+        "applicability_status": "unknown",
+        "within_applicability_envelope": False,
+        "calibration_unavailable_reason": "calibration_not_evaluated",
+        "nearest_supported_regime": "unknown",
+        "distance_to_supported_domain": None,
         "domain_shift_or_applicability": "unknown",
         "calibration_version": "unavailable",
     }
@@ -379,6 +385,7 @@ def run_inference(
                 eii_z_raw=eii_z_raw,
                 n_taxa=ntaxa,
                 gene_length_nt=L,
+                n_branches=K,
                 asset=calibration_asset,
             )
         except Exception as exc:
@@ -395,6 +402,13 @@ def run_inference(
     else:
         band_extent = "descriptive_band_suppressed"
         band_bool = False
+
+    calib_reason = str(ceii_payload.get("calibration_unavailable_reason", "") or "")
+    if calib_reason:
+        warnings.append(
+            "cEII probability abstained by applicability policy: "
+            f"{calib_reason}."
+        )
 
     warnings.append(
         "Raw EII is a dispersion magnitude statistic. Decision-ready identifiability "
@@ -441,13 +455,19 @@ def run_inference(
         "eii_01_raw": eii_01_raw,
         "EII_z": eii_z_raw,
         "EII_01": eii_01_raw,
-        "ceii_gene": float(ceii_payload["ceii_gene"]),
-        "ceii_site": float(ceii_payload["ceii_site"]),
+        "ceii_gene": ceii_payload.get("ceii_gene"),
+        "ceii_site": ceii_payload.get("ceii_site"),
         "ceii_gene_class": str(ceii_payload["ceii_gene_class"]),
         "ceii_site_class": str(ceii_payload["ceii_site_class"]),
         "ceii_gene_identifiable_bool": bool(ceii_payload["ceii_gene_identifiable_bool"]),
         "ceii_site_identifiable_bool": bool(ceii_payload["ceii_site_identifiable_bool"]),
         "ceii_ci": ceii_payload["ceii_ci"],
+        "applicability_score": ceii_payload.get("applicability_score"),
+        "applicability_status": str(ceii_payload.get("applicability_status", "unknown")),
+        "within_applicability_envelope": bool(ceii_payload.get("within_applicability_envelope", False)),
+        "calibration_unavailable_reason": ceii_payload.get("calibration_unavailable_reason"),
+        "nearest_supported_regime": str(ceii_payload.get("nearest_supported_regime", "unknown")),
+        "distance_to_supported_domain": ceii_payload.get("distance_to_supported_domain"),
         "domain_shift_or_applicability": str(ceii_payload["domain_shift_or_applicability"]),
         "calibration_version": str(ceii_payload["calibration_version"]),
         "identifiable_bool": band_bool,

@@ -22,7 +22,7 @@ Assistant Professor, Department of Zoology, Jhargram Raj College, Jhargram 72150
 \maketitle
 
 \begin{abstract}
-Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi is a likelihood-free framework that targets this identifiability question and separates it from adaptation claims. We lock the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(\overline{\ell}_i)$, where $\overline{\ell}_i$ is the site-level mean branch logit, and define raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. We then calibrate raw EII on held-out simulator truth to obtain calibrated identifiability probabilities: $c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \text{data})$ and $c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \text{data})$. Recoverability targets are truth-aware composites of site enrichment, site/branch rank agreement, burden alignment, and replicate-stability terms, with pre-registered binary labels for gene- and site-scale identifiability. Calibration uses isotonic regression on a dedicated calibration split with separate test and regime-holdout (OOD) evaluation. Matched-neutral significance remains a distinct inferential layer via empirical $p_{\mathrm{emp}}$ and BH-adjusted $q_{\mathrm{emp}}$. In the current locked benchmark, gene-scale calibration was more stable than site-scale calibration, and OOD degradation was strongest for site localization under high nuisance regimes. BABAPPAi is therefore presented as a calibrated identifiability diagnostic that complements, but does not replace, classical branch--site hypothesis tests.
+Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi is a likelihood-free framework that targets this identifiability question and separates it from adaptation claims. We lock the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(\overline{\ell}_i)$, where $\overline{\ell}_i$ is the site-level mean branch logit, and define raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. We then calibrate raw EII on held-out simulator truth \emph{conditionally on applicability}: $c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \text{data},A_{\mathrm{gene}}=\text{applicable},\texttt{ceii\_v2})$ and $c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \text{data},A_{\mathrm{site}}=\text{applicable},\texttt{ceii\_v2})$. Outside validated support, BABAPPAi abstains from calibrated probability output and reports explicit applicability diagnostics instead. Recoverability targets are truth-aware composites of site enrichment, site/branch rank agreement, burden alignment, and replicate-stability terms, with pre-registered binary labels for gene- and site-scale identifiability. Calibration uses a two-stage design (applicability gate + monotone score calibration) on a dedicated calibration split with separate test and regime-holdout (OOD) evaluation. Matched-neutral significance remains a distinct inferential layer via empirical $p_{\mathrm{emp}}$ and BH-adjusted $q_{\mathrm{emp}}$. In the current locked benchmark, gene-scale calibration was more stable than site-scale calibration, and OOD degradation was strongest for site localization under high nuisance regimes. BABAPPAi is therefore presented as a calibrated identifiability diagnostic that complements, but does not replace, classical branch--site hypothesis tests.
 \end{abstract}
 
 \noindent\textbf{Keywords:} episodic selection; branch--site evolution; likelihood-free inference; simulation-based inference; mutation--selection models; phylogenomics
@@ -32,7 +32,7 @@ Branch--site analyses are often interpreted as evidence for episodic positive se
     \item BABAPPAi targets the \emph{identifiability} of branch--site episodic signal rather than direct hypothesis testing for positive selection.
     \item The framework combines forward simulation under mutation--selection dynamics with likelihood-free neural inference trained on exact latent labels.
     \item Aggregate burden summaries are more recoverable than site-wise signals, indicating that episodic structure may become measurable at gene scale before it is precisely localizable.
-    \item The software reports raw dispersion diagnostics ($\mathrm{EII}_{z,\mathrm{raw}}$, $\mathrm{EII}_{01,\mathrm{raw}}$) and calibrated identifiability probabilities ($c\mathrm{EII}_{\mathrm{gene}}$, $c\mathrm{EII}_{\mathrm{site}}$).
+    \item The software reports raw dispersion diagnostics ($\mathrm{EII}_{z,\mathrm{raw}}$, $\mathrm{EII}_{01,\mathrm{raw}}$) universally, and reports calibrated identifiability probabilities ($c\mathrm{EII}_{\mathrm{gene}}$, $c\mathrm{EII}_{\mathrm{site}}$) only when applicability criteria are satisfied.
     \item Matched-neutral significance (\texttt{p\_emp}, \texttt{q\_emp}, \texttt{significant\_bool}) is a separate inferential layer and is not interchangeable with calibrated identifiability probability.
 \end{itemize}
 
@@ -160,14 +160,24 @@ I_{\mathrm{site}}=\mathbf{1}[R_{\mathrm{site}}\ge \tau_{\mathrm{site}}], \quad
 \]
 By design, $I_{\mathrm{site}}$ is stricter in the benchmarked domain.
 
-Empirical calibration maps raw EII to calibrated identifiability probability via isotonic regression on a dedicated calibration split:
+Calibration in \texttt{ceii\_v2} is two-stage. Stage 1 is an applicability function $A(x)$ over covariates $x$ (minimum: taxa count and gene length; optional additional run covariates):
 \[
-c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X),\qquad
-c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X),
+A(x)\in\{\texttt{in\_domain},\texttt{near\_boundary},\texttt{out\_of\_domain}\}.
 \]
-where $X$ includes alignment covariates when available (taxa count, alignment length, nuisance bins). Bootstrap resampling provides calibration-curve uncertainty.
+Only \texttt{in\_domain} samples are calibrated by default. Stage 2 fits a monotone mapping on a learned linear score from $(\mathrm{EII}_{z,\mathrm{raw}},X)$:
+\[
+c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X,A_{\mathrm{gene}}=\texttt{in\_domain},\texttt{ceii\_v2}),
+\]
+\[
+c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X,A_{\mathrm{site}}=\texttt{in\_domain},\texttt{ceii\_v2}).
+\]
+When $A\neq \texttt{in\_domain}$ (or applicability is insufficient), BABAPPAi abstains:
+\[
+c\mathrm{EII}_{\mathrm{gene}}=\varnothing,\qquad c\mathrm{EII}_{\mathrm{site}}=\varnothing,
+\]
+and emits explicit applicability metadata (\texttt{applicability\_score}, \texttt{applicability\_status}, \texttt{calibration\_unavailable\_reason}, nearest supported regime, and distance-to-domain diagnostics). Bootstrap resampling provides calibration-curve uncertainty.
 
-Calibrated decision bands are therefore empirical and versioned (\texttt{calibration\_version}); they are not fixed constants.
+Calibrated decision bands are empirical and versioned (\texttt{calibration\_version}); they are not universal constants and must be re-estimated when calibration assets change.
 
 Matched-neutral significance remains distinct from cEII:
 \[
@@ -197,7 +207,8 @@ $\mathrm{EII}_{z,\mathrm{raw}}$ & Raw standardized dispersion $(D_{\mathrm{obs}}
 $\mathrm{EII}_{01,\mathrm{raw}}$ & $\sigma(\mathrm{EII}_{z,\mathrm{raw}})$, bounded transform of raw EII. \\
 $R_{\mathrm{gene}},R_{\mathrm{site}}$ & Continuous recoverability composites from truth-aware metrics. \\
 $I_{\mathrm{gene}},I_{\mathrm{site}}$ & Binary recoverability labels from pre-registered thresholds. \\
-$c\mathrm{EII}_{\mathrm{gene}},c\mathrm{EII}_{\mathrm{site}}$ & Calibrated $P(I=1\mid\text{data})$ from held-out calibration. \\
+$A(x)$ & Applicability function for calibrated output validity (\texttt{in\_domain}/\texttt{near\_boundary}/\texttt{out\_of\_domain}). \\
+$c\mathrm{EII}_{\mathrm{gene}},c\mathrm{EII}_{\mathrm{site}}$ & Conditional calibrated $P(I=1\mid\text{data},A=\texttt{in\_domain},\texttt{ceii\_v2})$; otherwise abstain ($\varnothing$). \\
 $p_{\mathrm{emp}},q_{\mathrm{emp}}$ & Matched-neutral exceedance significance and BH-adjusted q-value. \\
 \hline
 \end{tabular}
@@ -231,11 +242,15 @@ The locked benchmark used 96 simulated genes (24 per latent regime), with strict
 
 \subsection{Raw EII versus calibrated cEII}
 
-Raw EII remained a useful continuous dispersion score but was not directly interpretable as identifiability probability. Isotonic calibration produced versioned mappings from raw $\mathrm{EII}_{z,\mathrm{raw}}$ to $c\mathrm{EII}_{\mathrm{gene}}$ and $c\mathrm{EII}_{\mathrm{site}}$. Under the current benchmark, the empirical decision thresholds selected from calibration data were $0.625$ (gene) and $0.167$ (site), with calibrated class edges derived from the same held-out mapping.
+Raw EII remained a useful continuous dispersion score but was not directly interpretable as identifiability probability. Under the \texttt{ceii\_v2} design, calibrated output is conditional on applicability support. The previous \texttt{ceii\_v1} behavior emitted a flat numeric fallback on this empirical panel, whereas \texttt{ceii\_v2} explicitly abstains outside support and reports diagnostics. In the replayed Drosophila panel, \texttt{ceii\_v2} produced calibrated gene-level probabilities for 5/8 successful genes and abstained for 3/8 (\texttt{out\_of\_domain} or \texttt{near\_boundary}); raw EII and $q_{\mathrm{emp}}$ remained available for all successful genes.
 
 \subsection{Reliability and operating characteristics}
 
-On held-out test data, gene-scale calibration yielded Brier $=0.281$ and ECE $=0.188$; OOD values were Brier $=0.266$ and ECE $=0.125$. Site-scale calibration was less stable (test: Brier $=0.233$, ECE $=0.241$; OOD: Brier $=0.153$, ECE $=0.185$), with marked PPV/FDR degradation in low-prevalence strata. These quantitative results support the intended interpretation: gene-level identifiability can emerge before site-level localization becomes decision-stable.
+On held-out test data, gene-scale calibration yielded Brier $=0.202$ and ECE $=0.219$; OOD values were Brier $=0.479$ and ECE $=0.514$. Site-scale calibration was less stable (test: Brier $=0.014$, ECE $=0.073$; OOD: Brier $=0.201$, ECE $=0.195$), with marked PPV/FDR degradation in low-prevalence strata. These quantitative results support the intended interpretation: gene-level identifiability can emerge before site-level localization becomes decision-stable, and OOD applicability must be surfaced rather than hidden.
+
+\subsection{Empirical applicability and abstention behavior}
+
+On the Drosophila control panel, the historical \texttt{ceii\_v1} asset returned a flat gene-level value ($0.625$) for all successful genes. Replaying the same raw outputs under the abstention-aware runtime showed that only 1/8 successful genes was in-domain for \texttt{ceii\_v1}, so 7/8 should have abstained instead of receiving a numeric probability. Under expanded \texttt{ceii\_v2} support, 5/8 successful genes were in-domain, 1/8 was near-boundary, and 2/8 were out-of-domain. This behavior is intentional: calibrated probabilities are emitted only where validated support exists; otherwise BABAPPAi reports raw EII + matched-neutral significance with explicit \texttt{calibration\_unavailable} status.
 
 \subsection{cEII and matched-neutral significance are complementary}
 
@@ -251,7 +266,7 @@ BABAPPAi is built around a simple but important shift in target: from \emph{dete
 
 A second central result is that aggregation stabilizes signal. In the present benchmarks, episodic structure was more recoverable at the gene level than at individual sites. This is both biologically and statistically plausible: episodic adaptation is often sparse, lineage-restricted and transient, so local evidence may be weak even when the gene as a whole carries a real episodic burden. BABAPPAi does not eliminate this difficulty; rather, it quantifies where along the scale hierarchy recoverability begins to emerge.
 
-The revised inference layer explicitly separates three outputs: raw EII magnitude, calibrated cEII probability, and matched-neutral significance. Raw EII is useful as a standardized dispersion effect size. cEII is the empirically calibrated probability that recoverability criteria are met in the validated simulation domain. $q_{\mathrm{emp}}$ indicates excess branch--site dispersion relative to matched-neutral expectation. None of these outputs, alone or combined, is interpreted as direct proof of adaptive substitution.
+The revised inference layer explicitly separates three outputs: raw EII magnitude, calibrated cEII probability, and matched-neutral significance. Raw EII is useful as a standardized dispersion effect size. cEII is the empirically calibrated probability that recoverability criteria are met in the validated simulation domain, and it is intentionally nullable outside applicability support. $q_{\mathrm{emp}}$ indicates excess branch--site dispersion relative to matched-neutral expectation. None of these outputs, alone or combined, is interpreted as direct proof of adaptive substitution.
 
 The method is intended to complement, not replace, established branch--site procedures such as PAML and HyPhy \cite{Yang2007,Murrell2012,KosakovskyPond2011,KosakovskyPond2020}. In practice, classical likelihood-based tests can still estimate codon-model effects, while BABAPPAi quantifies whether the alignment appears informative enough for stable episodic interpretation. Agreement between strong classical evidence and high $c\mathrm{EII}_{\mathrm{gene}}$ is expected to increase confidence; disagreement flags caution and additional sensitivity analyses.
 
@@ -263,7 +278,7 @@ BABAPPAi reframes branch--site analysis around recoverability and matched-neutra
 
 \section*{Availability and implementation}
 
-BABAPPAi is available as an open-source Python package at \url{https://github.com/krishnendusinha/babappai} and as the installable package \texttt{babappai} with CLI command \texttt{babappai}. The released software reports raw EII diagnostics, calibrated cEII probabilities/classes, and empirical matched-neutral p/q significance outputs with calibration/model provenance fields. BABAPPAi is the renamed continuation of the BABAPPA$\Omega$ codebase. Legacy frozen-model assets currently remain under the BABAPPA$\Omega$ naming for provenance and reproducibility; the frozen reference model used here is archived at \url{https://doi.org/10.5281/zenodo.18195869}. Legacy software-release provenance is archived at \url{https://doi.org/10.5281/zenodo.18520163}. Benchmarking artifacts, execution logs and related reproducibility materials are archived at \url{https://doi.org/10.5281/zenodo.18197957}.
+BABAPPAi is available as an open-source Python package at \url{https://github.com/krishnendusinha/babappai} and as the installable package \texttt{babappai} with CLI command \texttt{babappai}. The released software reports raw EII diagnostics, conditional calibrated cEII probabilities/classes (nullable under abstention), explicit applicability diagnostics (\texttt{applicability\_score}, \texttt{applicability\_status}, nearest-regime and distance metadata), and empirical matched-neutral p/q significance outputs with calibration/model provenance fields. BABAPPAi is the renamed continuation of the BABAPPA$\Omega$ codebase. Legacy frozen-model assets currently remain under the BABAPPA$\Omega$ naming for provenance and reproducibility; the frozen reference model used here is archived at \url{https://doi.org/10.5281/zenodo.18195869}. Legacy software-release provenance is archived at \url{https://doi.org/10.5281/zenodo.18520163}. Benchmarking artifacts, execution logs and related reproducibility materials are archived at \url{https://doi.org/10.5281/zenodo.18197957}.
 
 \section*{Data availability}
 

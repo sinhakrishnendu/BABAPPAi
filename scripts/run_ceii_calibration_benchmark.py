@@ -121,10 +121,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--neutral-reps", type=int, default=200)
     p.add_argument("--min-neutral-group-size", type=int, default=20)
-    p.add_argument("--calibration-version", default="ceii_v1")
+    p.add_argument("--calibration-version", default="ceii_v2")
     p.add_argument("--bootstrap-reps", type=int, default=200)
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
     p.add_argument("--target-fdr-site", type=float, default=0.10)
+    p.add_argument("--app-min-n-taxa", type=int, default=8)
+    p.add_argument("--app-max-n-taxa", type=int, default=64)
+    p.add_argument("--app-min-gene-length-nt", type=int, default=120)
+    p.add_argument("--app-max-gene-length-nt", type=int, default=4500)
     p.add_argument("--write-package-asset", action="store_true")
     p.add_argument("--offline", action="store_true")
     p.add_argument("--overwrite", action="store_true")
@@ -181,6 +185,14 @@ def main() -> int:
         str(float(args.target_fdr_site)),
         "--seed",
         str(int(args.seed)),
+        "--app-min-n-taxa",
+        str(int(args.app_min_n_taxa)),
+        "--app-max-n-taxa",
+        str(int(args.app_max_n_taxa)),
+        "--app-min-gene-length-nt",
+        str(int(args.app_min_gene_length_nt)),
+        "--app-max-gene-length-nt",
+        str(int(args.app_max_gene_length_nt)),
     ]
     if args.write_package_asset:
         fit_cmd.append("--write-package-asset")

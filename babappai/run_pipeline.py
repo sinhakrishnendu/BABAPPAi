@@ -189,6 +189,12 @@ def run_and_write_outputs(
                 "ceii_gene_identifiable_bool": payload["gene_summary"]["ceii_gene_identifiable_bool"],
                 "ceii_site_identifiable_bool": payload["gene_summary"]["ceii_site_identifiable_bool"],
                 "calibration_version": payload["gene_summary"]["calibration_version"],
+                "applicability_score": payload["gene_summary"].get("applicability_score"),
+                "applicability_status": payload["gene_summary"].get("applicability_status"),
+                "within_applicability_envelope": payload["gene_summary"].get("within_applicability_envelope"),
+                "calibration_unavailable_reason": payload["gene_summary"].get("calibration_unavailable_reason"),
+                "nearest_supported_regime": payload["gene_summary"].get("nearest_supported_regime"),
+                "distance_to_supported_domain": payload["gene_summary"].get("distance_to_supported_domain"),
                 "domain_shift_or_applicability": payload["gene_summary"]["domain_shift_or_applicability"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
@@ -218,6 +224,12 @@ def run_and_write_outputs(
                 "ceii_gene_identifiable_bool": payload["gene_summary"]["ceii_gene_identifiable_bool"],
                 "ceii_site_identifiable_bool": payload["gene_summary"]["ceii_site_identifiable_bool"],
                 "calibration_version": payload["gene_summary"]["calibration_version"],
+                "applicability_score": payload["gene_summary"].get("applicability_score"),
+                "applicability_status": payload["gene_summary"].get("applicability_status"),
+                "within_applicability_envelope": payload["gene_summary"].get("within_applicability_envelope"),
+                "calibration_unavailable_reason": payload["gene_summary"].get("calibration_unavailable_reason"),
+                "nearest_supported_regime": payload["gene_summary"].get("nearest_supported_regime"),
+                "distance_to_supported_domain": payload["gene_summary"].get("distance_to_supported_domain"),
                 "domain_shift_or_applicability": payload["gene_summary"]["domain_shift_or_applicability"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
@@ -247,6 +259,12 @@ def run_and_write_outputs(
             "ceii_gene_identifiable_bool",
             "ceii_site_identifiable_bool",
             "calibration_version",
+            "applicability_score",
+            "applicability_status",
+            "within_applicability_envelope",
+            "calibration_unavailable_reason",
+            "nearest_supported_regime",
+            "distance_to_supported_domain",
             "domain_shift_or_applicability",
             "identifiable_bool",
             "identifiability_extent",
@@ -276,6 +294,12 @@ def run_and_write_outputs(
             "ceii_gene_identifiable_bool",
             "ceii_site_identifiable_bool",
             "calibration_version",
+            "applicability_score",
+            "applicability_status",
+            "within_applicability_envelope",
+            "calibration_unavailable_reason",
+            "nearest_supported_regime",
+            "distance_to_supported_domain",
             "domain_shift_or_applicability",
             "identifiable_bool",
             "identifiability_extent",
@@ -326,16 +350,34 @@ def terminal_summary(payload: Dict[str, Any]) -> list[str]:
         for row in sites[:5]
     ) or "n/a"
 
+    def _fmt_opt_prob(value: Any) -> str:
+        if value is None:
+            return "n/a"
+        try:
+            fv = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        return f"{fv:.2f}" if fv == fv else "n/a"
+
     return [
         f"Empirical p-value (p_emp): {float(gene['p_emp']):.4g}" if gene.get("p_emp") is not None else "Empirical p-value (p_emp): n/a",
         f"BH q-value (q_emp): {float(gene['q_emp']):.4g}" if gene.get("q_emp") is not None else "BH q-value (q_emp): n/a",
         f"Significant at alpha={float(gene.get('alpha_used', 0.05)):.2f}: {'YES' if bool(gene.get('significant_bool')) else 'NO'}",
         f"Gene-level raw EII_z: {float(gene['eii_z_raw']):.2f}",
         f"Gene-level raw EII_01: {float(gene['eii_01_raw']):.2f}",
-        f"cEII_gene (P[identifiable]): {float(gene.get('ceii_gene', float('nan'))):.2f}",
-        f"cEII_site (P[identifiable]): {float(gene.get('ceii_site', float('nan'))):.2f}",
+        f"cEII_gene (P[identifiable]): {_fmt_opt_prob(gene.get('ceii_gene'))}",
+        f"cEII_site (P[identifiable]): {_fmt_opt_prob(gene.get('ceii_site'))}",
         f"cEII gene class: {gene.get('ceii_gene_class', 'n/a')} (calibration={gene.get('calibration_version', 'unknown')})",
-        f"Domain applicability: {gene.get('domain_shift_or_applicability', 'unknown')}",
+        (
+            "Applicability: "
+            f"{gene.get('applicability_status', gene.get('domain_shift_or_applicability', 'unknown'))} "
+            f"(score={_fmt_opt_prob(gene.get('applicability_score'))})"
+        ),
+        (
+            f"Calibration unavailable reason: {gene.get('calibration_unavailable_reason')}"
+            if gene.get("calibration_unavailable_reason")
+            else "Calibration unavailable reason: none"
+        ),
         f"Strongest branches: {branch_labels}",
         f"Top elevated sites: {site_labels}",
         "Note: raw EII is a dispersion magnitude; cEII is the calibrated identifiability probability layer.",

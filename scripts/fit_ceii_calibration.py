@@ -53,26 +53,210 @@ def _subset(rows: List[Mapping[str, Any]], split: str) -> List[Mapping[str, Any]
     return [r for r in rows if str(r.get("split", "")) == split]
 
 
+def _safe_float(value: Any) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return out if np.isfinite(out) else float("nan")
+
+
+def _feature_value(row: Mapping[str, Any], feature_name: str) -> float:
+    if feature_name == "eii_z_raw":
+        v = _safe_float(row.get("eii_z_raw", row.get("EII_z")))
+        return v
+    if feature_name == "eii_01_raw":
+        v = _safe_float(row.get("eii_01_raw", row.get("EII_01")))
+        return v
+    if feature_name == "n_taxa":
+        return _safe_float(row.get("n_taxa"))
+    if feature_name == "gene_length_nt":
+        return _safe_float(row.get("gene_length_nt"))
+    if feature_name == "n_branches":
+        direct = _safe_float(row.get("n_branches"))
+        if np.isfinite(direct):
+            return direct
+        n_taxa = _safe_float(row.get("n_taxa"))
+        if np.isfinite(n_taxa):
+            return max(1.0, 2.0 * n_taxa - 3.0)
+        return float("nan")
+    if feature_name.startswith("log1p_"):
+        base_name = feature_name[len("log1p_") :]
+        base = _feature_value(row, base_name)
+        if np.isfinite(base):
+            return float(np.log1p(max(base, 0.0)))
+        return float("nan")
+    return _safe_float(row.get(feature_name))
+
+
+def _rows_to_matrix(rows: List[Mapping[str, Any]], feature_names: List[str]) -> np.ndarray:
+    mat = np.asarray(
+        [[_feature_value(row, name) for name in feature_names] for row in rows],
+        dtype=float,
+    )
+    if mat.size == 0:
+        return mat
+    col_means = np.nanmean(mat, axis=0)
+    col_means = np.where(np.isfinite(col_means), col_means, 0.0)
+    nan_mask = ~np.isfinite(mat)
+    if np.any(nan_mask):
+        mat[nan_mask] = np.take(col_means, np.where(nan_mask)[1])
+    return mat
+
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    z = np.clip(np.asarray(x, dtype=float), -60.0, 60.0)
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def _fit_logistic_1d(score: np.ndarray, y: np.ndarray, *, ridge_lambda: float = 1e-3) -> Dict[str, float]:
+    x = np.asarray(score, dtype=float)
+    t = np.asarray(y, dtype=float)
+    mask = np.isfinite(x) & np.isfinite(t)
+    x = x[mask]
+    t = t[mask]
+    if x.size == 0:
+        return {"a": 0.0, "b": 0.0}
+    mean_t = float(np.clip(np.mean(t), 1e-4, 1.0 - 1e-4))
+    if np.all(t == t[0]):
+        return {"a": 0.0, "b": float(np.log(mean_t / (1.0 - mean_t)))}
+
+    X = np.column_stack([x, np.ones_like(x)])
+    theta = np.asarray([0.0, float(np.log(mean_t / (1.0 - mean_t)))], dtype=float)
+    reg = np.diag([float(ridge_lambda), 0.0])
+    for _ in range(200):
+        p = _sigmoid(X @ theta)
+        w = np.clip(p * (1.0 - p), 1e-6, None)
+        grad = X.T @ (p - t) + reg @ theta
+        hess = X.T @ (X * w[:, None]) + reg
+        step = np.linalg.solve(hess, grad)
+        theta = theta - step
+        if float(np.linalg.norm(step)) < 1e-6:
+            break
+    a = float(theta[0])
+    b = float(theta[1])
+    if not np.isfinite(a):
+        a = 0.0
+    if not np.isfinite(b):
+        b = 0.0
+    # Keep calibration monotone increasing in score.
+    if a < 0.0:
+        a = abs(a)
+    return {"a": a, "b": b}
+
+
+def _predict_logistic_1d(model: Mapping[str, Any], score: np.ndarray) -> np.ndarray:
+    a = float(model.get("a", 0.0))
+    b = float(model.get("b", 0.0))
+    return _sigmoid(a * np.asarray(score, dtype=float) + b)
+
+
+def _predict_blended_probability(model: Mapping[str, Any], score: np.ndarray) -> np.ndarray:
+    p_iso = predict_isotonic(model["isotonic_calibrator"], score)
+    logi = model.get("logistic_calibrator")
+    if isinstance(logi, Mapping):
+        p_log = _predict_logistic_1d(logi, score)
+        w_iso = float(np.clip(float(model.get("blend_weight_isotonic", 0.5)), 0.0, 1.0))
+        return np.clip(w_iso * p_iso + (1.0 - w_iso) * p_log, 0.0, 1.0)
+    return p_iso
+
+
+def _fit_linear_score_isotonic(
+    rows: List[Mapping[str, Any]],
+    *,
+    label_key: str,
+    feature_names: List[str],
+    ridge_lambda: float = 1e-3,
+) -> Dict[str, Any]:
+    x_raw = _rows_to_matrix(rows, feature_names)
+    y = np.asarray([int(float(r[label_key])) for r in rows], dtype=float)
+    if x_raw.size == 0:
+        raise ValueError(f"No rows available for target {label_key}.")
+    mu = np.mean(x_raw, axis=0)
+    sigma = np.std(x_raw, axis=0)
+    sigma = np.where(sigma > 1e-8, sigma, 1.0)
+    xz = (x_raw - mu) / sigma
+    x_design = np.column_stack([np.ones(xz.shape[0], dtype=float), xz])
+    reg = np.eye(x_design.shape[1], dtype=float) * float(ridge_lambda)
+    reg[0, 0] = 0.0
+    beta = np.linalg.solve(x_design.T @ x_design + reg, x_design.T @ y)
+    intercept = float(beta[0])
+    coef = np.asarray(beta[1:], dtype=float)
+    scores = intercept + (xz @ coef)
+    iso = fit_isotonic_binary(scores, y)
+    logi = _fit_logistic_1d(scores, y)
+    p_iso = predict_isotonic(iso, scores)
+    p_log = _predict_logistic_1d(logi, scores)
+    # Prefer isotonic when it has resolution; otherwise rely more on smooth logistic mapping.
+    iso_unique = len(np.unique(np.round(p_iso, 6)))
+    blend_weight_iso = 0.35 if iso_unique <= 2 else 0.65
+    return {
+        "type": "linear_score_isotonic",
+        "feature_names": list(feature_names),
+        "feature_mean": mu.astype(float).tolist(),
+        "feature_scale": sigma.astype(float).tolist(),
+        "coef": coef.astype(float).tolist(),
+        "intercept": intercept,
+        "isotonic_calibrator": iso,
+        "logistic_calibrator": logi,
+        "blend_weight_isotonic": float(blend_weight_iso),
+    }
+
+
+def _predict_linear_score(model: Mapping[str, Any], rows: List[Mapping[str, Any]]) -> np.ndarray:
+    feature_names = [str(x) for x in model.get("feature_names", [])]
+    if not feature_names:
+        raise ValueError("linear_score_isotonic model missing feature_names")
+    x_raw = _rows_to_matrix(rows, feature_names)
+    mu = np.asarray(model.get("feature_mean", []), dtype=float)
+    sigma = np.asarray(model.get("feature_scale", []), dtype=float)
+    coef = np.asarray(model.get("coef", []), dtype=float)
+    if mu.size != len(feature_names) or sigma.size != len(feature_names) or coef.size != len(feature_names):
+        raise ValueError("linear_score_isotonic model payload has inconsistent dimensions")
+    sigma = np.where(np.abs(sigma) > 1e-8, sigma, 1.0)
+    xz = (x_raw - mu) / sigma
+    intercept = float(model.get("intercept", 0.0))
+    return intercept + (xz @ coef)
+
+
+def _predict_target(model: Mapping[str, Any], rows: List[Mapping[str, Any]]) -> np.ndarray:
+    if str(model.get("type", "")) == "linear_score_isotonic":
+        score = _predict_linear_score(model, rows)
+        return _predict_blended_probability(model, score)
+    # backward compatibility: direct isotonic calibrator payload.
+    x = np.asarray([float(r["EII_z"]) for r in rows], dtype=float)
+    return predict_isotonic(model, x)
+
+
 def _bootstrap_ci_calibrator(
-    x: np.ndarray,
+    x_score: np.ndarray,
     y: np.ndarray,
     *,
-    x_grid: np.ndarray,
+    score_grid: np.ndarray,
     bootstrap_reps: int,
     seed: int,
+    blend_with_logistic: bool = True,
 ) -> Dict[str, List[float]]:
-    if x.size == 0:
-        return {"x": x_grid.tolist(), "lower": [0.0] * x_grid.size, "upper": [1.0] * x_grid.size}
+    if x_score.size == 0:
+        return {"x": score_grid.tolist(), "lower": [0.0] * score_grid.size, "upper": [1.0] * score_grid.size}
     rng = np.random.default_rng(seed)
     preds = []
-    n = x.size
+    n = x_score.size
     for _ in range(int(bootstrap_reps)):
         idx = rng.integers(0, n, size=n)
-        cal = fit_isotonic_binary(x[idx], y[idx])
-        preds.append(predict_isotonic(cal, x_grid))
+        cal = fit_isotonic_binary(x_score[idx], y[idx])
+        p = predict_isotonic(cal, score_grid)
+        if blend_with_logistic:
+            logi = _fit_logistic_1d(x_score[idx], y[idx])
+            p_log = _predict_logistic_1d(logi, score_grid)
+            p_fit = predict_isotonic(cal, x_score[idx])
+            iso_unique = len(np.unique(np.round(p_fit, 6)))
+            w_iso = 0.35 if iso_unique <= 2 else 0.65
+            p = np.clip(w_iso * p + (1.0 - w_iso) * p_log, 0.0, 1.0)
+        preds.append(p)
     arr = np.asarray(preds, dtype=float)
     return {
-        "x": x_grid.tolist(),
+        "x": score_grid.tolist(),
         "lower": np.quantile(arr, 0.025, axis=0).tolist(),
         "upper": np.quantile(arr, 0.975, axis=0).tolist(),
     }
@@ -126,7 +310,7 @@ def _stabilize_threshold(
 
 def _evaluate_target(
     rows: List[Mapping[str, Any]],
-    calibrator: Mapping[str, Any],
+    model: Mapping[str, Any],
     *,
     label_key: str,
     target_name: str,
@@ -137,9 +321,8 @@ def _evaluate_target(
         part = _subset(rows, split)
         if not part:
             continue
-        x = np.asarray([float(r["EII_z"]) for r in part], dtype=float)
         y = np.asarray([int(r[label_key]) for r in part], dtype=int)
-        p = predict_isotonic(calibrator, x)
+        p = _predict_target(model, part)
         fixed = {
             "split": split,
             "target": target_name,
@@ -163,13 +346,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--metrics-tsv", required=True)
     p.add_argument("--outdir", required=True)
-    p.add_argument("--calibration-version", default="ceii_v1")
+    p.add_argument("--calibration-version", default="ceii_v2")
     p.add_argument("--tau-gene", type=float, default=0.42)
     p.add_argument("--tau-site", type=float, default=0.45)
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
     p.add_argument("--target-fdr-site", type=float, default=0.10)
     p.add_argument("--bootstrap-reps", type=int, default=200)
     p.add_argument("--seed", type=int, default=123)
+    p.add_argument("--app-min-n-taxa", type=int, default=None)
+    p.add_argument("--app-max-n-taxa", type=int, default=None)
+    p.add_argument("--app-min-gene-length-nt", type=int, default=None)
+    p.add_argument("--app-max-gene-length-nt", type=int, default=None)
+    p.add_argument("--near-boundary-fraction", type=float, default=0.08)
+    p.add_argument("--min-applicability-score", type=float, default=0.95)
+    p.add_argument("--allow-near-boundary-calibration", action="store_true")
     p.add_argument("--write-package-asset", action="store_true")
     return p
 
@@ -198,15 +388,31 @@ def main() -> int:
     if not cal_rows:
         raise RuntimeError("Calibration split is empty.")
 
-    x_cal = np.asarray([float(r["EII_z"]) for r in cal_rows], dtype=float)
+    feature_names = [
+        "eii_z_raw",
+        "eii_01_raw",
+        "log1p_n_taxa",
+        "log1p_gene_length_nt",
+        "log1p_n_branches",
+    ]
     y_gene_cal = np.asarray([int(r["I_gene"]) for r in cal_rows], dtype=int)
     y_site_cal = np.asarray([int(r["I_site"]) for r in cal_rows], dtype=int)
 
-    gene_cal = fit_isotonic_binary(x_cal, y_gene_cal)
-    site_cal = fit_isotonic_binary(x_cal, y_site_cal)
+    gene_model = _fit_linear_score_isotonic(
+        cal_rows,
+        label_key="I_gene",
+        feature_names=feature_names,
+    )
+    site_model = _fit_linear_score_isotonic(
+        cal_rows,
+        label_key="I_site",
+        feature_names=feature_names,
+    )
 
-    p_gene_cal = predict_isotonic(gene_cal, x_cal)
-    p_site_cal = predict_isotonic(site_cal, x_cal)
+    score_gene_cal = _predict_linear_score(gene_model, cal_rows)
+    score_site_cal = _predict_linear_score(site_model, cal_rows)
+    p_gene_cal = _predict_blended_probability(gene_model, score_gene_cal)
+    p_site_cal = _predict_blended_probability(site_model, score_site_cal)
 
     thr_gene_main = derive_threshold(y_gene_cal, p_gene_cal, target_fdr=float(args.target_fdr_gene))
     thr_site_main = derive_threshold(y_site_cal, p_site_cal, target_fdr=float(args.target_fdr_site))
@@ -266,36 +472,86 @@ def main() -> int:
     if not (s_main < s_strong):
         s_strong = float(np.clip(s_main + 0.10, min(1.0, s_main + 1e-6), 1.0))
 
-    x_grid = np.unique(np.asarray(gene_cal["x"], dtype=float))
+    score_gene_grid = np.unique(np.asarray(gene_model["isotonic_calibrator"]["x"], dtype=float))
+    score_site_grid = np.unique(np.asarray(site_model["isotonic_calibrator"]["x"], dtype=float))
     gene_ci = _bootstrap_ci_calibrator(
-        x_cal,
+        score_gene_cal,
         y_gene_cal,
-        x_grid=x_grid,
+        score_grid=score_gene_grid,
         bootstrap_reps=int(args.bootstrap_reps),
         seed=int(args.seed) + 101,
     )
     site_ci = _bootstrap_ci_calibrator(
-        x_cal,
+        score_site_cal,
         y_site_cal,
-        x_grid=x_grid,
+        score_grid=score_site_grid,
         bootstrap_reps=int(args.bootstrap_reps),
         seed=int(args.seed) + 202,
     )
 
+    gene_model["prediction_ci"] = {
+        "lower": {"x": gene_ci["x"], "y": gene_ci["lower"]},
+        "upper": {"x": gene_ci["x"], "y": gene_ci["upper"]},
+    }
+    site_model["prediction_ci"] = {
+        "lower": {"x": site_ci["x"], "y": site_ci["lower"]},
+        "upper": {"x": site_ci["x"], "y": site_ci["upper"]},
+    }
+
     cal_taxa = np.asarray([int(float(r["n_taxa"])) for r in cal_rows], dtype=int)
     cal_len = np.asarray([int(float(r["gene_length_nt"])) for r in cal_rows], dtype=int)
+
+    app_min_n_taxa = int(np.min(cal_taxa)) if args.app_min_n_taxa is None else int(args.app_min_n_taxa)
+    app_max_n_taxa = int(np.max(cal_taxa)) if args.app_max_n_taxa is None else int(args.app_max_n_taxa)
+    app_min_gene_len = int(np.min(cal_len)) if args.app_min_gene_length_nt is None else int(args.app_min_gene_length_nt)
+    app_max_gene_len = int(np.max(cal_len)) if args.app_max_gene_length_nt is None else int(args.app_max_gene_length_nt)
+
+    regime_groups: Dict[str, Dict[str, Any]] = {}
+    for row in cal_rows:
+        name = "|".join(
+            [
+                str(row.get("tree_bin", "unknown")),
+                str(row.get("gene_length_bin", "unknown")),
+                str(row.get("recombination_bin", "unknown")),
+                str(row.get("alignment_noise_bin", "unknown")),
+                str(row.get("mutation_rate_heterogeneity_bin", "unknown")),
+            ]
+        )
+        bucket = regime_groups.setdefault(name, {"n_taxa": [], "gene_length_nt": []})
+        bucket["n_taxa"].append(float(row["n_taxa"]))
+        bucket["gene_length_nt"].append(float(row["gene_length_nt"]))
+
+    supported_regimes = []
+    for name, vals in sorted(regime_groups.items()):
+        supported_regimes.append(
+            {
+                "name": name,
+                "center": {
+                    "n_taxa": float(np.median(np.asarray(vals["n_taxa"], dtype=float))),
+                    "gene_length_nt": float(np.median(np.asarray(vals["gene_length_nt"], dtype=float))),
+                },
+            }
+        )
+
     asset = {
         "calibration_version": str(args.calibration_version),
         "d_obs_definition": D_OBS_DEFINITION,
         "raw_eii_definition": "eii_z_raw = (D_obs - mu0) / max(sigma0_raw, sigma_floor), eii_01_raw = sigmoid(eii_z_raw)",
+        "calibration_semantics": (
+            "cEII is a conditional calibrated identifiability probability valid only when "
+            "applicability criteria are satisfied; otherwise calibration abstains."
+        ),
         "target_definitions": {
             "R_gene": "0.45*branch_rank_norm + 0.35*burden_alignment + 0.20*scenario_branch_stability",
             "R_site": "0.45*site_enrichment_at_k + 0.35*site_rank_norm + 0.20*scenario_site_stability",
             "I_gene": f"1 if R_gene >= {float(args.tau_gene):.2f} else 0",
             "I_site": f"1 if R_site >= {float(args.tau_site):.2f} else 0",
         },
-        "gene_calibrator": gene_cal,
-        "site_calibrator": site_cal,
+        "gene_model": gene_model,
+        "site_model": site_model,
+        # Legacy compatibility fields retained for older consumers; ceii_v2 should use *_model.
+        "gene_calibrator": gene_model["isotonic_calibrator"],
+        "site_calibrator": site_model["isotonic_calibrator"],
         "prediction_ci": {
             "gene_lower": {"x": gene_ci["x"], "y": gene_ci["lower"]},
             "gene_upper": {"x": gene_ci["x"], "y": gene_ci["upper"]},
@@ -331,15 +587,25 @@ def main() -> int:
             ],
         },
         "applicability": {
-            "min_n_taxa": int(np.min(cal_taxa)),
-            "max_n_taxa": int(np.max(cal_taxa)),
-            "min_gene_length_nt": int(np.min(cal_len)),
-            "max_gene_length_nt": int(np.max(cal_len)),
+            "features": {
+                "n_taxa": {"min": app_min_n_taxa, "max": app_max_n_taxa},
+                "gene_length_nt": {"min": app_min_gene_len, "max": app_max_gene_len},
+            },
+            "near_boundary_fraction": float(args.near_boundary_fraction),
+            "min_applicability_score_for_calibration": float(args.min_applicability_score),
+            "allow_near_boundary_calibration": bool(args.allow_near_boundary_calibration),
+            "supported_regimes": supported_regimes,
         },
         "provenance": {
             "metrics_tsv_name": str(Path(args.metrics_tsv).name),
             "bootstrap_reps": int(args.bootstrap_reps),
             "seed": int(args.seed),
+            "split_counts": {
+                "train": int(sum(1 for r in augmented if str(r.get("split")) == "train")),
+                "calibration": int(sum(1 for r in augmented if str(r.get("split")) == "calibration")),
+                "test": int(sum(1 for r in augmented if str(r.get("split")) == "test")),
+                "ood": int(sum(1 for r in augmented if str(r.get("split")) == "ood")),
+            },
         },
     }
 
@@ -349,7 +615,7 @@ def main() -> int:
     metrics_rows.extend(
         _evaluate_target(
             augmented,
-            gene_cal,
+            gene_model,
             label_key="I_gene",
             target_name="I_gene",
             threshold=float(asset["thresholds"]["gene"]["threshold"]),
@@ -358,7 +624,7 @@ def main() -> int:
     metrics_rows.extend(
         _evaluate_target(
             augmented,
-            site_cal,
+            site_model,
             label_key="I_site",
             target_name="I_site",
             threshold=float(asset["thresholds"]["site"]["threshold"]),
@@ -371,17 +637,20 @@ def main() -> int:
         part = _subset(augmented, split)
         if not part:
             continue
-        x = np.asarray([float(r["EII_z"]) for r in part], dtype=float)
         y_gene = np.asarray([int(r["I_gene"]) for r in part], dtype=int)
         y_site = np.asarray([int(r["I_site"]) for r in part], dtype=int)
-        p_gene = predict_isotonic(gene_cal, x)
-        p_site = predict_isotonic(site_cal, x)
+        p_gene = _predict_target(gene_model, part)
+        p_site = _predict_target(site_model, part)
         reliability_rows.extend(_reliability_rows(y_gene, p_gene, split=split, target="I_gene"))
         reliability_rows.extend(_reliability_rows(y_site, p_site, split=split, target="I_site"))
     _write_tsv(outdir / "ceii_reliability.tsv", reliability_rows)
 
     if args.write_package_asset:
-        pkg_path = REPO_ROOT / "babappai" / "data" / "ceii_calibration_v1.json"
+        if str(args.calibration_version).startswith("ceii_v2"):
+            pkg_name = "ceii_calibration_v2.json"
+        else:
+            pkg_name = "ceii_calibration_v1.json"
+        pkg_path = REPO_ROOT / "babappai" / "data" / pkg_name
         save_calibration_asset(asset, pkg_path)
         print(f"Wrote package calibration asset: {pkg_path}")
 

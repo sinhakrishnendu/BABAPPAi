@@ -111,10 +111,13 @@ def test_inference_empirical_significance_and_sigma_floor(monkeypatch):
                 ],
             },
             "applicability": {
-                "min_n_taxa": 2,
-                "max_n_taxa": 128,
-                "min_gene_length_nt": 3,
-                "max_gene_length_nt": 10000,
+                "features": {
+                    "n_taxa": {"min": 2, "max": 128},
+                    "gene_length_nt": {"min": 3, "max": 10000},
+                },
+                "near_boundary_fraction": 0.01,
+                "min_applicability_score_for_calibration": 0.0,
+                "allow_near_boundary_calibration": True,
             },
         },
     )
@@ -140,4 +143,6 @@ def test_inference_empirical_significance_and_sigma_floor(monkeypatch):
     assert float(gene["EII_z"]) == float(gene["eii_z_raw"])
     assert 0.0 <= float(gene["eii_01_raw"]) <= 1.0
     assert 0.0 <= float(gene["ceii_gene"]) <= 1.0
+    assert str(gene["applicability_status"]) in {"in_domain", "near_boundary"}
+    assert bool(gene["within_applicability_envelope"]) is True
     assert gene["identifiability_extent"] == gene["ceii_gene_class"]

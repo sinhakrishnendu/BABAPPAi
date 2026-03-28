@@ -251,6 +251,7 @@ def assign_scenario_splits(
                 "tree_bin": str(row.get("tree_bin", "")),
                 "recombination_bin": str(row.get("recombination_bin", "")),
                 "alignment_noise_bin": str(row.get("alignment_noise_bin", "")),
+                "n_taxa": int(float(row.get("n_taxa", 0) or 0)),
             },
         )
 
@@ -258,7 +259,7 @@ def assign_scenario_splits(
         sid
         for sid, meta in scenario_keys.items()
         if (
-            meta["tree_bin"] == "large_deep"
+            int(meta.get("n_taxa", 0)) >= 24
             and (meta["recombination_bin"] == "high" or meta["alignment_noise_bin"] == "high")
         )
     }
