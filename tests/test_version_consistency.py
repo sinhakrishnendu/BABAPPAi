@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+import pytest
 
 import babappai.cli as cli
 from babappai import __version__
@@ -32,6 +35,11 @@ def test_installed_metadata_version_matches_runtime_version():
     ]
     with TemporaryDirectory() as temp_dir:
         output = subprocess.check_output(cmd, cwd=temp_dir, text=True).strip()
+    if output != __version__ and os.environ.get("CI", "").lower() != "true":
+        pytest.skip(
+            "Installed distribution version does not match this checkout. "
+            "Run after `pip install -e .` to enforce locally."
+        )
     assert output == __version__
 
 
