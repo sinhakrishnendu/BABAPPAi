@@ -61,6 +61,22 @@ def _safe_float(value: Any) -> float:
     return out if np.isfinite(out) else float("nan")
 
 
+def _safe_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", ""}:
+        return False
+    try:
+        return bool(int(float(text)))
+    except (TypeError, ValueError):
+        return bool(default)
+
+
 def _feature_value(row: Mapping[str, Any], feature_name: str) -> float:
     if feature_name == "eii_z_raw":
         v = _safe_float(row.get("eii_z_raw", row.get("EII_z")))
@@ -382,11 +398,31 @@ def main() -> int:
     attach_recoverability_targets(augmented, tau_gene=float(args.tau_gene), tau_site=float(args.tau_site))
     assign_scenario_splits(augmented, seed=int(args.seed))
 
+    # cEII calibration is valid only when the null-dispersion layer was numerically valid.
+    # Keep all rows for traceability, but fit/evaluate calibration on sigma-valid rows only.
+    for row in augmented:
+        sigma0_valid = _safe_bool(row.get("sigma0_valid"))
+        sigma0_floored = _safe_bool(row.get("sigma0_floored", row.get("sigma_floor_applied")))
+        fallback_applied = _safe_bool(row.get("fallback_applied", row.get("calibration_fallback_flag")))
+        row["sigma0_valid_for_calibration"] = int(bool(sigma0_valid and not sigma0_floored and not fallback_applied))
+        if row["sigma0_valid_for_calibration"]:
+            row["sigma0_exclusion_reason"] = ""
+        else:
+            reasons: List[str] = []
+            if not sigma0_valid:
+                reasons.append("sigma0_invalid")
+            if sigma0_floored:
+                reasons.append("sigma0_floored")
+            if fallback_applied:
+                reasons.append("fallback_applied")
+            row["sigma0_exclusion_reason"] = ",".join(reasons) if reasons else "sigma0_invalid_or_missing"
+
     _write_tsv(outdir / "recoverability_augmented.tsv", augmented)
 
-    cal_rows = _subset(augmented, "calibration")
+    valid_rows = [r for r in augmented if int(r.get("sigma0_valid_for_calibration", 0)) == 1]
+    cal_rows = _subset(valid_rows, "calibration")
     if not cal_rows:
-        raise RuntimeError("Calibration split is empty.")
+        raise RuntimeError("Calibration split is empty after sigma-valid filtering.")
 
     feature_names = [
         "eii_z_raw",
@@ -606,6 +642,14 @@ def main() -> int:
                 "test": int(sum(1 for r in augmented if str(r.get("split")) == "test")),
                 "ood": int(sum(1 for r in augmented if str(r.get("split")) == "ood")),
             },
+            "split_counts_sigma_valid": {
+                "train": int(sum(1 for r in valid_rows if str(r.get("split")) == "train")),
+                "calibration": int(sum(1 for r in valid_rows if str(r.get("split")) == "calibration")),
+                "test": int(sum(1 for r in valid_rows if str(r.get("split")) == "test")),
+                "ood": int(sum(1 for r in valid_rows if str(r.get("split")) == "ood")),
+            },
+            "n_rows_total": int(len(augmented)),
+            "n_rows_sigma_valid": int(len(valid_rows)),
         },
     }
 
@@ -614,7 +658,7 @@ def main() -> int:
     metrics_rows: List[Dict[str, Any]] = []
     metrics_rows.extend(
         _evaluate_target(
-            augmented,
+            valid_rows,
             gene_model,
             label_key="I_gene",
             target_name="I_gene",
@@ -623,7 +667,7 @@ def main() -> int:
     )
     metrics_rows.extend(
         _evaluate_target(
-            augmented,
+            valid_rows,
             site_model,
             label_key="I_site",
             target_name="I_site",
@@ -634,7 +678,7 @@ def main() -> int:
 
     reliability_rows: List[Dict[str, Any]] = []
     for split in ("calibration", "test", "ood"):
-        part = _subset(augmented, split)
+        part = _subset(valid_rows, split)
         if not part:
             continue
         y_gene = np.asarray([int(r["I_gene"]) for r in part], dtype=int)
@@ -644,6 +688,28 @@ def main() -> int:
         reliability_rows.extend(_reliability_rows(y_gene, p_gene, split=split, target="I_gene"))
         reliability_rows.extend(_reliability_rows(y_site, p_site, split=split, target="I_site"))
     _write_tsv(outdir / "ceii_reliability.tsv", reliability_rows)
+
+    exclusion_counts: Dict[str, int] = {}
+    for row in augmented:
+        reason = str(row.get("sigma0_exclusion_reason", "") or "")
+        if reason:
+            exclusion_counts[reason] = exclusion_counts.get(reason, 0) + 1
+    applicability_summary = {
+        "n_total_rows": int(len(augmented)),
+        "n_sigma_valid_rows": int(len(valid_rows)),
+        "fraction_sigma_valid_rows": float(len(valid_rows) / len(augmented)) if augmented else float("nan"),
+        "n_abstained_due_sigma_or_fallback": int(len(augmented) - len(valid_rows)),
+        "sigma_exclusion_counts": dict(sorted(exclusion_counts.items())),
+        "split_counts_sigma_valid": {
+            "train": int(sum(1 for r in valid_rows if str(r.get("split")) == "train")),
+            "calibration": int(sum(1 for r in valid_rows if str(r.get("split")) == "calibration")),
+            "test": int(sum(1 for r in valid_rows if str(r.get("split")) == "test")),
+            "ood": int(sum(1 for r in valid_rows if str(r.get("split")) == "ood")),
+        },
+    }
+    (outdir / "ceii_applicability_summary.json").write_text(
+        json.dumps(applicability_summary, indent=2) + "\n"
+    )
 
     if args.write_package_asset:
         if str(args.calibration_version).startswith("ceii_v2"):
@@ -659,6 +725,7 @@ def main() -> int:
         "recoverability_augmented_tsv": str(outdir / "recoverability_augmented.tsv"),
         "split_performance_tsv": str(outdir / "ceii_split_performance.tsv"),
         "reliability_tsv": str(outdir / "ceii_reliability.tsv"),
+        "applicability_summary_json": str(outdir / "ceii_applicability_summary.json"),
         "calibration_version": str(args.calibration_version),
     }
     (outdir / "ceii_calibration_summary.json").write_text(json.dumps(summary, indent=2) + "\n")

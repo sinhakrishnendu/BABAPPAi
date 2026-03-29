@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from babappai import __version__
+from babappai.dispersion import PRIMARY_DISPERSION_METHOD
 from babappai.inference import run_inference
 from babappai.interpret import interpret_results
 from babappai.metadata import (
@@ -59,6 +60,7 @@ def run_and_write_outputs(
     sigma_floor: float = 0.0,
     alpha: float = 0.05,
     pvalue_mode: str = "empirical_monte_carlo",
+    dispersion_method: str = PRIMARY_DISPERSION_METHOD,
     retain_eii_bands: bool = True,
     report_threshold_bands: bool = True,
     ceii_enabled: bool = True,
@@ -101,6 +103,7 @@ def run_and_write_outputs(
         sigma_floor=sigma_floor,
         alpha=alpha,
         pvalue_mode=pvalue_mode,
+        dispersion_method=dispersion_method,
         neutral_reps=neutral_reps,
         min_neutral_group_size=min_neutral_group_size,
         retain_eii_bands=retain_eii_bands,
@@ -151,6 +154,7 @@ def run_and_write_outputs(
             "sigma_floor": float(sigma_floor),
             "alpha": float(alpha),
             "pvalue_mode": str(pvalue_mode),
+            "dispersion_method": str(dispersion_method),
             "neutral_reps": int(neutral_reps),
             "min_neutral_group_size": int(min_neutral_group_size),
             "retain_eii_bands": bool(retain_eii_bands),
@@ -195,6 +199,9 @@ def run_and_write_outputs(
                 "calibration_unavailable_reason": payload["gene_summary"].get("calibration_unavailable_reason"),
                 "nearest_supported_regime": payload["gene_summary"].get("nearest_supported_regime"),
                 "distance_to_supported_domain": payload["gene_summary"].get("distance_to_supported_domain"),
+                "sigma0_valid": payload["gene_summary"].get("sigma0_valid"),
+                "sigma0_floored": payload["gene_summary"].get("sigma0_floored"),
+                "fallback_applied": payload["gene_summary"].get("fallback_applied"),
                 "domain_shift_or_applicability": payload["gene_summary"]["domain_shift_or_applicability"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
@@ -230,6 +237,9 @@ def run_and_write_outputs(
                 "calibration_unavailable_reason": payload["gene_summary"].get("calibration_unavailable_reason"),
                 "nearest_supported_regime": payload["gene_summary"].get("nearest_supported_regime"),
                 "distance_to_supported_domain": payload["gene_summary"].get("distance_to_supported_domain"),
+                "sigma0_valid": payload["gene_summary"].get("sigma0_valid"),
+                "sigma0_floored": payload["gene_summary"].get("sigma0_floored"),
+                "fallback_applied": payload["gene_summary"].get("fallback_applied"),
                 "domain_shift_or_applicability": payload["gene_summary"]["domain_shift_or_applicability"],
                 "identifiable_bool": payload["gene_summary"]["identifiable_bool"],
                 "identifiability_extent": payload["gene_summary"]["identifiability_extent"],
@@ -265,6 +275,9 @@ def run_and_write_outputs(
             "calibration_unavailable_reason",
             "nearest_supported_regime",
             "distance_to_supported_domain",
+            "sigma0_valid",
+            "sigma0_floored",
+            "fallback_applied",
             "domain_shift_or_applicability",
             "identifiable_bool",
             "identifiability_extent",
@@ -300,6 +313,9 @@ def run_and_write_outputs(
             "calibration_unavailable_reason",
             "nearest_supported_regime",
             "distance_to_supported_domain",
+            "sigma0_valid",
+            "sigma0_floored",
+            "fallback_applied",
             "domain_shift_or_applicability",
             "identifiable_bool",
             "identifiability_extent",
@@ -377,6 +393,16 @@ def terminal_summary(payload: Dict[str, Any]) -> list[str]:
             f"Calibration unavailable reason: {gene.get('calibration_unavailable_reason')}"
             if gene.get("calibration_unavailable_reason")
             else "Calibration unavailable reason: none"
+        ),
+        (
+            "WARNING: calibrated cEII outputs withheld due to applicability/null-calibration checks."
+            if gene.get("ceii_gene") is None or gene.get("ceii_site") is None
+            else "Calibrated cEII outputs available."
+        ),
+        (
+            f"sigma0_valid={bool(gene.get('sigma0_valid'))}, "
+            f"sigma0_floored={bool(gene.get('sigma0_floored'))}, "
+            f"fallback_applied={bool(gene.get('fallback_applied', gene.get('fallback_flag')))}"
         ),
         f"Strongest branches: {branch_labels}",
         f"Top elevated sites: {site_labels}",

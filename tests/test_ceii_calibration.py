@@ -11,6 +11,7 @@ from babappai.calibration.ceii import (
     derive_threshold,
     expected_calibration_error,
     fit_isotonic_binary,
+    load_calibration_asset,
     predict_isotonic,
     save_calibration_asset,
 )
@@ -200,3 +201,19 @@ def test_apply_ceii_calibration_linear_score_model() -> None:
     assert out["ceii_site"] is not None
     assert 0.0 <= float(out["ceii_gene"]) <= 1.0
     assert 0.0 <= float(out["ceii_site"]) <= 1.0
+
+
+def test_packaged_ceii_v2_asset_abstains_out_of_domain() -> None:
+    asset = load_calibration_asset()
+    assert str(asset.get("calibration_version", "")).startswith("ceii_v2")
+    out = apply_ceii_calibration(
+        eii_z_raw=0.5,
+        n_taxa=512,
+        gene_length_nt=9000,
+        asset=asset,
+    )
+    assert out["ceii_gene"] is None
+    assert out["ceii_site"] is None
+    assert out["ceii_gene_class"] == "calibration_unavailable"
+    assert out["ceii_site_class"] == "calibration_unavailable"
+    assert str(out["applicability_status"]) in {"out_of_domain", "near_boundary"}

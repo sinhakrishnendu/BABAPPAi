@@ -128,21 +128,113 @@ def test_inference_empirical_significance_and_sigma_floor(monkeypatch):
         offline=True,
         pvalue_mode="empirical_monte_carlo",
         neutral_reps=4,
+        min_neutral_group_size=1,
         sigma_floor=0.05,
         alpha=0.05,
         seed=7,
     )
     gene = result["gene_level_identifiability"]
+    required_schema = {
+        "applicability_score",
+        "applicability_status",
+        "within_applicability_envelope",
+        "calibration_unavailable_reason",
+        "nearest_supported_regime",
+        "distance_to_supported_domain",
+        "sigma0_valid",
+        "sigma0_floored",
+        "fallback_applied",
+        "ceii_gene",
+        "ceii_site",
+        "ceii_gene_class",
+        "ceii_site_class",
+        "eii_z_raw",
+        "eii_01_raw",
+        "q_emp",
+        "significant_bool",
+    }
+    assert required_schema.issubset(gene.keys())
 
     expected_p = empirical_monte_carlo_pvalue(gene["D_obs"], neutral.tolist())
     assert abs(float(gene["p_emp"]) - float(expected_p)) < 1e-12
     assert gene["neutral_replicates"] == neutral.tolist()
     assert float(gene["sigma0_final"]) >= 0.05
     assert abs(float(gene["sigma0_final"]) - float(gene["neutral_sd"])) < 1e-12
+    assert bool(gene["sigma0_floored"]) is True
+    assert bool(gene["sigma0_valid"]) is False
+    assert bool(gene["fallback_applied"]) is False
     assert bool(gene["significant_bool"]) == (float(gene["q_emp"]) <= 0.05)
     assert float(gene["EII_z"]) == float(gene["eii_z_raw"])
     assert 0.0 <= float(gene["eii_01_raw"]) <= 1.0
-    assert 0.0 <= float(gene["ceii_gene"]) <= 1.0
-    assert str(gene["applicability_status"]) in {"in_domain", "near_boundary"}
+    assert gene["ceii_gene"] is None
+    assert gene["ceii_site"] is None
+    assert gene["ceii_gene_class"] == "calibration_unavailable"
+    assert str(gene["applicability_status"]) == "calibration_unavailable"
+    assert "sigma0_floored" in str(gene.get("calibration_unavailable_reason", ""))
     assert bool(gene["within_applicability_envelope"]) is True
     assert gene["identifiability_extent"] == gene["ceii_gene_class"]
+
+
+def test_inference_abstains_when_sigma_nonfinite(monkeypatch):
+    _patch_inference_runtime(monkeypatch)
+
+    neutral = np.asarray([0.01, 0.02, 0.03, 0.04], dtype=float)
+    mu0 = float(np.mean(neutral))
+    monkeypatch.setattr(
+        tree_calibration,
+        "monte_carlo_neutral",
+        lambda **kwargs: (mu0, float("nan"), neutral),
+    )
+    monkeypatch.setattr(
+        inference,
+        "load_calibration_asset",
+        lambda *_args, **_kwargs: {
+            "calibration_version": "ceii_test",
+            "gene_calibrator": {"x": [-3.0, 0.0, 3.0], "y": [0.1, 0.5, 0.9]},
+            "site_calibrator": {"x": [-3.0, 0.0, 3.0], "y": [0.05, 0.4, 0.8]},
+            "thresholds": {
+                "gene": {"threshold": 0.6},
+                "site": {"threshold": 0.65},
+            },
+            "classes": {
+                "gene": [
+                    {"label": "not_identifiable", "min": 0.0, "max": 0.4},
+                    {"label": "weak_or_ambiguous", "min": 0.4, "max": 0.6},
+                    {"label": "identifiable", "min": 0.6, "max": 0.8},
+                    {"label": "strongly_identifiable", "min": 0.8, "max": 1.0},
+                ],
+                "site": [
+                    {"label": "not_identifiable", "min": 0.0, "max": 0.4},
+                    {"label": "weak_or_ambiguous", "min": 0.4, "max": 0.65},
+                    {"label": "identifiable", "min": 0.65, "max": 0.8},
+                    {"label": "strongly_identifiable", "min": 0.8, "max": 1.0},
+                ],
+            },
+            "applicability": {
+                "features": {
+                    "n_taxa": {"min": 2, "max": 128},
+                    "gene_length_nt": {"min": 3, "max": 10000},
+                },
+                "near_boundary_fraction": 0.01,
+                "min_applicability_score_for_calibration": 0.0,
+                "allow_near_boundary_calibration": True,
+            },
+        },
+    )
+    result = inference.run_inference(
+        alignment_path="dummy.fasta",
+        tree_path="dummy.nwk",
+        offline=True,
+        pvalue_mode="empirical_monte_carlo",
+        neutral_reps=4,
+        sigma_floor=0.001,
+        alpha=0.05,
+        seed=11,
+    )
+    gene = result["gene_level_identifiability"]
+    assert gene["ceii_gene"] is None
+    assert gene["ceii_site"] is None
+    assert gene["ceii_gene_class"] == "calibration_unavailable"
+    assert str(gene["applicability_status"]) == "calibration_unavailable"
+    assert "sigma0_non_finite" in str(gene.get("calibration_unavailable_reason", ""))
+    assert bool(gene["sigma0_valid"]) is False

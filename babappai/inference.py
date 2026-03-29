@@ -16,6 +16,7 @@ from babappai.calibration import (
     get_neutral_reference,
     load_calibration_asset,
 )
+from babappai.dispersion import PRIMARY_DISPERSION_METHOD, compute_dispersion
 from babappai.encoding import encode_alignment
 from babappai.identifiability import eii01_from_eiiz
 from babappai.metadata import MODEL_DOI, MODEL_FILE_NAME, MODEL_SHA256, MODEL_TAG
@@ -129,6 +130,34 @@ def _extract_branch_logits(branch_logits: torch.Tensor, n_branches: int) -> np.n
     return branch_values.detach().cpu().numpy()
 
 
+def _force_ceii_abstention(
+    payload: Dict[str, Any],
+    *,
+    reason: str,
+    status_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    status = str(status_override or payload.get("applicability_status") or "calibration_unavailable")
+    out = dict(payload)
+    out.update(
+        {
+            "ceii_gene": None,
+            "ceii_site": None,
+            "ceii_gene_class": "calibration_unavailable",
+            "ceii_site_class": "calibration_unavailable",
+            "ceii_gene_identifiable_bool": False,
+            "ceii_site_identifiable_bool": False,
+            "ceii_ci": {
+                "gene": {"lower": None, "upper": None},
+                "site": {"lower": None, "upper": None},
+            },
+            "applicability_status": status,
+            "domain_shift_or_applicability": status,
+            "calibration_unavailable_reason": str(reason),
+        }
+    )
+    return out
+
+
 def run_inference(
     alignment_path: str,
     tree_path: Optional[str] = None,
@@ -146,6 +175,7 @@ def run_inference(
     sigma_floor: float = 0.0,
     alpha: float = 0.05,
     pvalue_mode: str = "empirical_monte_carlo",
+    dispersion_method: str = PRIMARY_DISPERSION_METHOD,
     neutral_reps: int = 200,
     min_neutral_group_size: int = 20,
     retain_eii_bands: bool = True,
@@ -232,7 +262,7 @@ def run_inference(
     branch_logit_mean = _extract_branch_logits(branch_logits, K)
     branch_background = 1.0 / (1.0 + np.exp(-np.clip(branch_logit_mean, -60.0, 60.0)))
 
-    sigma2_obs = float(np.var(site_logit_mean, ddof=1)) if len(site_logit_mean) > 1 else 0.0
+    sigma2_obs = compute_dispersion(site_logit_mean, method=str(dispersion_method))
 
     if batch_size != 1:
         warnings.append(
@@ -278,6 +308,7 @@ def run_inference(
                 "_resolved_device_override": resolved_device,
                 "retain_eii_bands": retain_eii_bands,
                 "report_threshold_bands": report_threshold_bands,
+                "dispersion_method": str(dispersion_method),
             },
         )
         sims_arr = np.asarray(sims, dtype=float)
@@ -308,13 +339,13 @@ def run_inference(
             elif "n" in reference:
                 neutral_group_size = int(reference["n"])
             else:
-                neutral_group_size = 0
+                neutral_group_size = None
         warnings.append(
             "pvalue_mode=frozen_reference does not provide empirical Monte Carlo p-values; "
             "use pvalue_mode=empirical_monte_carlo for significance decisions."
         )
 
-    if pvalue_mode != "disabled" and int(neutral_group_size or 0) < int(min_neutral_group_size):
+    if pvalue_mode == "empirical_monte_carlo" and int(neutral_group_size or 0) < int(min_neutral_group_size):
         fallback_flag = True
         if fallback_reason is None:
             fallback_reason = "neutral_group_below_minimum"
@@ -323,7 +354,8 @@ def run_inference(
             f"({neutral_group_size} < {min_neutral_group_size})."
         )
 
-    if neutral_sd_raw is None or not np.isfinite(neutral_sd_raw) or neutral_sd_raw <= 0:
+    sigma0_raw_finite = bool(neutral_sd_raw is not None and np.isfinite(neutral_sd_raw))
+    if not sigma0_raw_finite or float(neutral_sd_raw) <= 0:
         if not fallback_flag:
             fallback_flag = True
             fallback_reason = "non_positive_or_invalid_neutral_sd"
@@ -338,7 +370,17 @@ def run_inference(
             fallback_reason = "non_positive_sigma_after_floor"
         neutral_sd_floored = 1e-8
 
-    sigma_floor_applied = bool(sigma_floor > 0 and neutral_sd_floored == float(sigma_floor))
+    sigma_floor_applied = bool(sigma_floor > 0 and neutral_sd_floored <= float(sigma_floor) + 1e-12)
+    sigma0_floored = bool(sigma_floor_applied)
+    fallback_applied = bool(fallback_flag)
+
+    sigma0_valid = bool(
+        pvalue_mode != "disabled"
+        and sigma0_raw_finite
+        and float(neutral_sd_raw) > 0
+        and not sigma0_floored
+        and not fallback_applied
+    )
 
     dispersion_ratio = None
     if neutral_expected_variance and neutral_expected_variance > 0:
@@ -370,12 +412,12 @@ def run_inference(
             "site": {"lower": None, "upper": None},
         },
         "applicability_score": None,
-        "applicability_status": "unknown",
+        "applicability_status": "calibration_unavailable",
         "within_applicability_envelope": False,
         "calibration_unavailable_reason": "calibration_not_evaluated",
         "nearest_supported_regime": "unknown",
         "distance_to_supported_domain": None,
-        "domain_shift_or_applicability": "unknown",
+        "domain_shift_or_applicability": "calibration_unavailable",
         "calibration_version": "unavailable",
     }
     if ceii_enabled:
@@ -393,8 +435,53 @@ def run_inference(
                 "cEII calibration unavailable; returning raw EII diagnostics only. "
                 f"Reason: {exc}"
             )
+            ceii_payload = _force_ceii_abstention(
+                ceii_payload,
+                reason=f"calibration_runtime_error:{exc}",
+                status_override="calibration_unavailable",
+            )
     else:
         warnings.append("cEII calibration disabled by caller; returning raw EII diagnostics only.")
+        ceii_payload = _force_ceii_abstention(
+            ceii_payload,
+            reason="ceii_disabled_by_caller",
+            status_override="calibration_unavailable",
+        )
+
+    sigma_abstain_reasons: List[str] = []
+    if pvalue_mode == "disabled":
+        sigma_abstain_reasons.append("null_calibration_disabled")
+    if not sigma0_raw_finite:
+        sigma_abstain_reasons.append("sigma0_non_finite")
+    elif float(neutral_sd_raw) <= 0:
+        sigma_abstain_reasons.append("sigma0_non_positive")
+    if sigma0_floored:
+        sigma_abstain_reasons.append("sigma0_floored")
+    if fallback_applied:
+        sigma_abstain_reasons.append(
+            "null_calibration_fallback_applied"
+            + (f":{fallback_reason}" if fallback_reason else "")
+        )
+
+    if sigma_abstain_reasons:
+        existing_reason = str(ceii_payload.get("calibration_unavailable_reason", "") or "")
+        sigma_reason = ",".join(sigma_abstain_reasons)
+        combined_reason = (
+            f"{existing_reason}; {sigma_reason}"
+            if existing_reason and sigma_reason not in existing_reason
+            else sigma_reason or existing_reason
+        )
+        current_status = str(ceii_payload.get("applicability_status", "") or "")
+        status_override = (
+            "calibration_unavailable"
+            if current_status in {"in_domain", "near_boundary", "unknown", ""}
+            else None
+        )
+        ceii_payload = _force_ceii_abstention(
+            ceii_payload,
+            reason=combined_reason,
+            status_override=status_override,
+        )
 
     if retain_eii_bands:
         band_extent = str(ceii_payload.get("ceii_gene_class", "calibration_unavailable"))
@@ -421,10 +508,14 @@ def run_inference(
     gene_summary = {
         "D_obs": sigma2_obs,
         "D_obs_definition": D_OBS_DEFINITION,
+        "D_obs_method": str(dispersion_method),
         "mu0": neutral_expected_variance,
         "sigma0_raw": neutral_sd_raw,
         "sigma0_final": neutral_sd_floored,
         "sigma_floor_used": float(sigma_floor),
+        "sigma0_valid": sigma0_valid,
+        "sigma0_floored": sigma0_floored,
+        "fallback_applied": fallback_applied,
         "fallback_flag": fallback_flag,
         "fallback_reason": fallback_reason,
         "neutral_group_size": neutral_group_size,

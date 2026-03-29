@@ -76,6 +76,9 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     calib_unavailable_reason = gene.get("calibration_unavailable_reason")
     nearest_supported_regime = gene.get("nearest_supported_regime")
     distance_to_supported_domain = gene.get("distance_to_supported_domain")
+    sigma0_valid = gene.get("sigma0_valid")
+    sigma0_floored = gene.get("sigma0_floored")
+    fallback_applied = gene.get("fallback_applied", gene.get("fallback_flag"))
     p_emp = gene.get("p_emp")
     q_emp = gene.get("q_emp")
     alpha_used = gene.get("alpha_used")
@@ -129,6 +132,12 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
         lines.append(f"Distance to supported domain: {float(distance_to_supported_domain):.3f}")
     if calib_unavailable_reason:
         lines.append(f"Calibration unavailable reason: {calib_unavailable_reason}")
+    if sigma0_valid is not None:
+        lines.append(f"sigma0_valid: {'YES' if bool(sigma0_valid) else 'NO'}")
+    if sigma0_floored is not None:
+        lines.append(f"sigma0_floored: {'YES' if bool(sigma0_floored) else 'NO'}")
+    if fallback_applied is not None:
+        lines.append(f"fallback_applied: {'YES' if bool(fallback_applied) else 'NO'}")
     lines.append(_regime_explanation(str(extent)))
     lines.append("")
 
@@ -161,6 +170,7 @@ def render_interpretation(result_input, *, top_branches: int = 10, top_sites: in
     lines.append("raw EII_z / EII_01 are dispersion magnitude diagnostics.")
     lines.append("cEII_gene / cEII_site are empirically calibrated probabilities of recoverability.")
     lines.append("cEII class labels are derived from the loaded calibration asset, not fixed constants.")
+    lines.append("If applicability fails or null-dispersion calibration is invalid/floored, cEII abstains (null).")
     lines.append("")
     lines.append(
         "Inferential significance is based on empirical p_emp/q_emp from matched neutral calibration; "

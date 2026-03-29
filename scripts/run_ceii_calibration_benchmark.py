@@ -20,6 +20,7 @@ from babappai.validation.full_pipeline_validation import (  # noqa: E402
     run_full_pipeline_inference_on_dataset,
     simulate_alignment_validation_dataset,
 )
+from babappai.dispersion import PRIMARY_DISPERSION_METHOD, SUPPORTED_DISPERSION_METHODS  # noqa: E402
 
 
 def _read_tsv(path: Path) -> List[Dict[str, str]]:
@@ -112,12 +113,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=123)
     p.add_argument("--device", default="cpu")
     p.add_argument("--batch-size", type=int, default=1)
-    p.add_argument("--sigma-floor", type=float, default=0.05)
+    p.add_argument("--sigma-floor", type=float, default=0.001)
     p.add_argument("--alpha", type=float, default=0.05)
     p.add_argument(
         "--pvalue-mode",
         choices=["empirical_monte_carlo", "frozen_reference"],
-        default="frozen_reference",
+        default="empirical_monte_carlo",
+    )
+    p.add_argument(
+        "--dispersion-method",
+        choices=list(SUPPORTED_DISPERSION_METHODS),
+        default=PRIMARY_DISPERSION_METHOD,
     )
     p.add_argument("--neutral-reps", type=int, default=200)
     p.add_argument("--min-neutral-group-size", type=int, default=20)
@@ -162,6 +168,7 @@ def main() -> int:
         sigma_floor=float(args.sigma_floor),
         alpha=float(args.alpha),
         pvalue_mode=args.pvalue_mode,
+        dispersion_method=args.dispersion_method,
         min_neutral_group_size=int(args.min_neutral_group_size),
         neutral_reps=int(args.neutral_reps),
         offline=bool(args.offline),

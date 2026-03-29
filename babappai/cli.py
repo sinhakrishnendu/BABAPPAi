@@ -11,6 +11,7 @@ from typing import List, Optional
 from babappai import __version__
 from babappai.calibration import default_calibration_asset_path, load_calibration_asset
 from babappai.calibration.neutral_generator_adapter import run_neutral_generator
+from babappai.dispersion import PRIMARY_DISPERSION_METHOD, SUPPORTED_DISPERSION_METHODS
 from babappai.metadata import (
     MODEL_COMPATIBILITY_NOTE,
     MODEL_DOI,
@@ -79,6 +80,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             sigma_floor=args.sigma_floor,
             alpha=args.alpha,
             pvalue_mode=args.pvalue_mode,
+            dispersion_method=args.dispersion_method,
             retain_eii_bands=args.retain_eii_bands,
             report_threshold_bands=args.report_threshold_bands,
             ceii_enabled=args.ceii_enabled,
@@ -387,9 +389,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["empirical_monte_carlo", "frozen_reference"],
         default="empirical_monte_carlo",
     )
+    run_parser.add_argument(
+        "--dispersion-method",
+        choices=list(SUPPORTED_DISPERSION_METHODS),
+        default=PRIMARY_DISPERSION_METHOD,
+        help=(
+            "Dispersion statistic used for raw EII. "
+            "Use default for release/publication runs; alternatives are for validation ablations."
+        ),
+    )
     run_parser.add_argument("--neutral-reps", type=int, default=200)
     run_parser.add_argument("--min-neutral-group-size", type=int, default=20)
-    run_parser.add_argument("--sigma-floor", type=float, default=0.05)
+    run_parser.add_argument("--sigma-floor", type=float, default=0.001)
     run_parser.add_argument("--retain-eii-bands", dest="retain_eii_bands", action="store_true")
     run_parser.add_argument("--no-retain-eii-bands", dest="retain_eii_bands", action="store_false")
     run_parser.set_defaults(retain_eii_bands=True)
@@ -483,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     og_run.add_argument("--neutral-reps", type=int, default=200)
     og_run.add_argument("--min-neutral-group-size", type=int, default=20)
-    og_run.add_argument("--sigma-floor", type=float, default=0.05)
+    og_run.add_argument("--sigma-floor", type=float, default=0.001)
     og_run.add_argument("--offline", action="store_true")
     og_run.add_argument("--overwrite", action="store_true")
     og_run.add_argument("--robustness-limit", type=int, default=10)
@@ -509,7 +520,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     syn_run.add_argument("--neutral-reps", type=int, default=200)
     syn_run.add_argument("--min-neutral-group-size", type=int, default=20)
-    syn_run.add_argument("--sigma-floor", type=float, default=0.05)
+    syn_run.add_argument("--sigma-floor", type=float, default=0.001)
     syn_run.add_argument("--offline", action="store_true")
     syn_run.add_argument("--overwrite", action="store_true")
     syn_run.add_argument("--replicates-per-cell", type=int, default=2)

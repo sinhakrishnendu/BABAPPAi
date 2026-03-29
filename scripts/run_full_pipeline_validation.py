@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_calibration", type=int, default=200)
     p.add_argument("--device", default="cpu")
     p.add_argument("--batch_size", type=int, default=1)
-    p.add_argument("--sigma_floor", type=float, default=0.05)
+    p.add_argument("--sigma_floor", type=float, default=0.001)
     p.add_argument("--alpha", type=float, default=0.05)
     p.add_argument(
         "--pvalue_mode",

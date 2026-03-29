@@ -11,8 +11,8 @@ import numpy as np
 
 
 D_OBS_DEFINITION = (
-    "Sample variance (ddof=1) of site-level mean branch logits (site_logit_mean) "
-    "across codon sites for the observed alignment."
+    "Two-sided 5% winsorized sample variance (ddof=1) of site-level mean "
+    "branch logits (site_logit_mean) across codon sites for the observed alignment."
 )
 
 

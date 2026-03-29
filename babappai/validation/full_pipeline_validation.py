@@ -22,6 +22,11 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
+from babappai.dispersion import (
+    PRIMARY_DISPERSION_METHOD,
+    SUPPORTED_DISPERSION_METHODS,
+    compute_dispersion,
+)
 from babappai.metadata import SOFTWARE_VERSION
 from babappai.run_pipeline import run_and_write_outputs
 from babappai.stats import annotate_bh_qvalues, bh_adjust
@@ -693,24 +698,13 @@ def _site_summary_mean_score(site_summary_path: Path) -> float:
 
 
 def _compute_dispersion_from_site_summary(site_summary_path: Path, mode: str) -> float:
-    site_scores: List[float] = []
     site_logits: List[float] = []
     with site_summary_path.open() as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for row in reader:
-            site_scores.append(float(row["site_score"]))
             site_logits.append(float(row["site_logit_mean"]))
 
-    if len(site_scores) <= 1:
-        return 0.0
-
-    if mode != "site_logit_variance":
-        raise ValueError(
-            "Unsupported dispersion statistic: "
-            f"{mode}. BABAPPAi now locks D_obs to sample variance (ddof=1) "
-            "of site_logit_mean across codon sites."
-        )
-    return float(np.var(np.asarray(site_logits), ddof=1))
+    return compute_dispersion(site_logits, method=str(mode))
 
 
 def _coerce_finite_float(value: Any, *, field: str, run_label: str) -> float:
@@ -765,9 +759,10 @@ def run_full_pipeline_inference_on_dataset(
     n_calibration: int,
     device: str,
     batch_size: int,
-    sigma_floor: float = 0.05,
+    sigma_floor: float = 0.001,
     alpha: float = 0.05,
     pvalue_mode: str = "empirical_monte_carlo",
+    dispersion_method: str = PRIMARY_DISPERSION_METHOD,
     min_neutral_group_size: int = 20,
     neutral_reps: int = 200,
     offline: bool,
@@ -803,6 +798,7 @@ def run_full_pipeline_inference_on_dataset(
             sigma_floor=sigma_floor,
             alpha=alpha,
             pvalue_mode=pvalue_mode,
+            dispersion_method=dispersion_method,
             min_neutral_group_size=min_neutral_group_size,
             neutral_reps=neutral_reps,
             offline=offline,
@@ -811,11 +807,13 @@ def run_full_pipeline_inference_on_dataset(
 
         gene = payload["gene_summary"]
         site_summary_path = run_out / "site_summary.tsv"
-        requested_dispersion = "site_logit_variance"
-        if row.get("dispersion_statistic") not in (None, "", "site_logit_variance"):
+        requested_dispersion = str(dispersion_method)
+        row_dispersion = row.get("dispersion_statistic")
+        # Older manifests may carry historical dispersion labels in metadata; inference now
+        # computes D_obs directly from site summaries using requested_dispersion.
+        if requested_dispersion not in SUPPORTED_DISPERSION_METHODS:
             raise RuntimeError(
-                f"{run_label}: unsupported dispersion_statistic `{row.get('dispersion_statistic')}`. "
-                "Locked method requires site_logit_variance."
+                f"{run_label}: unsupported requested dispersion method `{requested_dispersion}`."
             )
         d_obs_requested = _compute_dispersion_from_site_summary(site_summary_path, requested_dispersion)
 
@@ -862,6 +860,7 @@ def run_full_pipeline_inference_on_dataset(
             )
 
         fallback_flag = int(bool(gene.get("fallback_flag", gene.get("calibration_fallback_flag"))))
+        fallback_applied = int(bool(gene.get("fallback_applied", gene.get("fallback_flag", fallback_flag))))
         fallback_reason = str(gene.get("fallback_reason", gene.get("calibration_fallback_reason")) or "")
         neutral_group_size_raw = gene.get("neutral_group_size")
         neutral_group_size = (
@@ -870,6 +869,8 @@ def run_full_pipeline_inference_on_dataset(
             else 0
         )
         sigma_floor_applied = int(bool(gene.get("sigma_floor_applied", sigma0 <= sigma_floor + 1e-12)))
+        sigma0_valid = int(bool(gene.get("sigma0_valid", 0)))
+        sigma0_floored = int(bool(gene.get("sigma0_floored", sigma_floor_applied)))
         calibration_group = str(gene.get("calibration_group", row.get("stratum_id", "global")))
         calibration_source = str(gene.get("calibration_source") or "")
         p_emp = _coerce_optional_float(gene.get("p_emp"))
@@ -913,9 +914,15 @@ def run_full_pipeline_inference_on_dataset(
                 "gene_burden_score": _site_summary_mean_score(site_summary_path),
                 "calibration_group": calibration_group,
                 "calibration_source": calibration_source,
+                "applicability_status": str(gene.get("applicability_status") or ""),
+                "within_applicability_envelope": int(bool(gene.get("within_applicability_envelope", False))),
+                "calibration_unavailable_reason": str(gene.get("calibration_unavailable_reason") or ""),
                 "calibration_fallback_flag": fallback_flag,
+                "fallback_applied": fallback_applied,
                 "calibration_fallback_reason": fallback_reason,
                 "neutral_group_size": neutral_group_size,
+                "sigma0_valid": sigma0_valid,
+                "sigma0_floored": sigma0_floored,
                 "sigma_floor_requested": float(sigma_floor),
                 "sigma_floor_applied": sigma_floor_applied,
                 "requested_dispersion_matches_calibration_stat": requested_matches_calibration,
@@ -928,7 +935,7 @@ def run_full_pipeline_inference_on_dataset(
                 "stratum_id": calibration_group,
                 "calibration_group": calibration_group,
                 "dispersion_statistic_requested": requested_dispersion,
-                "calibration_dispersion_statistic": "site_logit_variance",
+                "calibration_dispersion_statistic": requested_dispersion,
                 "requested_dispersion_matches_calibration_stat": requested_matches_calibration,
                 "D_obs": d_obs,
                 "mu0": mu0,
@@ -942,8 +949,14 @@ def run_full_pipeline_inference_on_dataset(
                 "fallback_reason": fallback_reason,
                 "neutral_group_size": neutral_group_size,
                 "calibration_source": calibration_source,
+                "applicability_status": str(gene.get("applicability_status") or ""),
+                "within_applicability_envelope": int(bool(gene.get("within_applicability_envelope", False))),
+                "calibration_unavailable_reason": str(gene.get("calibration_unavailable_reason") or ""),
                 "sigma_floor_requested": float(sigma_floor),
                 "sigma_floor_applied": sigma_floor_applied,
+                "sigma0_valid": sigma0_valid,
+                "sigma0_floored": sigma0_floored,
+                "fallback_applied": fallback_applied,
             }
         )
 
@@ -977,6 +990,7 @@ def run_full_pipeline_inference_on_dataset(
     fraction_fallback = float(np.mean(fallback_flags)) if fallback_flags.size > 0 else float("nan")
 
     sigma_diagnostics = {
+        "dispersion_method": str(dispersion_method),
         "sigma_floor_requested": float(sigma_floor),
         "alpha_used": float(alpha),
         "pvalue_mode": str(pvalue_mode),
@@ -2107,7 +2121,7 @@ def run_full_pipeline_validation(
     n_calibration: int = 200,
     device: str = "cpu",
     batch_size: int = 1,
-    sigma_floor: float = 0.05,
+    sigma_floor: float = 0.001,
     alpha: float = 0.05,
     pvalue_mode: str = "empirical_monte_carlo",
     min_neutral_group_size: int = 20,

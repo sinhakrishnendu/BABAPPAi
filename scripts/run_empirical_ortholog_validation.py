@@ -461,10 +461,17 @@ def write_report(
         if str(r.get("applicability_status", "")).lower() == "in_domain"
         and numeric_or_none(r.get("ceii_gene")) is not None
     ]
+    in_domain_ceii_values = [
+        float(v)
+        for v in (numeric_or_none(r.get("ceii_gene")) for r in in_domain_rows)
+        if v is not None
+    ]
+    ceii_constant_in_domain = len({round(v, 6) for v in in_domain_ceii_values}) <= 1 if in_domain_ceii_values else False
+    in_domain_rows_for_claims = [] if ceii_constant_in_domain else in_domain_rows
     abstained_rows = [r for r in ok_rows if r not in in_domain_rows]
 
     strongest_ceii = sorted(
-        [(r["gene_name"], numeric_or_none(r.get("ceii_gene"))) for r in in_domain_rows],
+        [(r["gene_name"], numeric_or_none(r.get("ceii_gene"))) for r in in_domain_rows_for_claims],
         key=lambda x: (-1 if x[1] is None else 0, -(x[1] or -1)),
     )
     strongest_ceii = [(g, v) for g, v in strongest_ceii if v is not None][:5]
@@ -482,12 +489,12 @@ def write_report(
 
     ambiguous = [
         r["gene_name"]
-        for r in in_domain_rows
+        for r in in_domain_rows_for_claims
         if str(r.get("ceii_gene_class", "")) in {"weak_or_ambiguous", "not_identifiable"}
     ]
 
     by_class_ceii: Dict[str, List[float]] = {}
-    for r in in_domain_rows:
+    for r in in_domain_rows_for_claims:
         cls = str(r.get("expected_control_class", "unknown_control_class"))
         val = numeric_or_none(r.get("ceii_gene"))
         if val is None:
@@ -518,7 +525,7 @@ def write_report(
 
     paired = [
         (numeric_or_none(r.get("ceii_gene")), numeric_or_none(r.get("ceii_site")))
-        for r in in_domain_rows
+        for r in in_domain_rows_for_claims
     ]
     paired = [(g, s) for g, s in paired if g is not None and s is not None]
     site_lower_frac = sum(1 for g, s in paired if s < g) / len(paired) if paired else float("nan")
@@ -545,6 +552,10 @@ def write_report(
     if strongest_ceii:
         strongest_txt = ", ".join(f"{g} ({v:.3f})" for g, v in strongest_ceii)
         lines.append(f"- Strongest gene-level identifiability (`ceii_gene`, in-domain only): {strongest_txt}.")
+    elif ceii_constant_in_domain and in_domain_rows:
+        lines.append(
+            "- Strongest gene-level identifiability (`ceii_gene`, in-domain only): withheld because in-domain cEII is constant and non-discriminative."
+        )
     else:
         lines.append("- Strongest gene-level identifiability (`ceii_gene`): unavailable because no genes were in-domain calibrated.")
     if strongest_raw:
@@ -566,6 +577,10 @@ def write_report(
         lines.append(f"- Expected-control separation (median `ceii_gene`, in-domain only): {class_txt}.")
         lines.append(
             f"- Expected positives separate above conservative/housekeeping controls (cEII, in-domain): {'yes' if separated_ceii else 'not clearly'}."
+        )
+    elif ceii_constant_in_domain and in_domain_rows:
+        lines.append(
+            "- Expected-control separation via cEII: withheld because in-domain cEII is constant; fallback interpretation uses raw EII + q_emp."
         )
     else:
         lines.append("- Expected-control separation via cEII: unavailable (no in-domain calibrated set).")
@@ -840,6 +855,9 @@ def main() -> int:
                     "calibration_unavailable_reason": gene_summary.get("calibration_unavailable_reason"),
                     "nearest_supported_regime": gene_summary.get("nearest_supported_regime"),
                     "distance_to_supported_domain": gene_summary.get("distance_to_supported_domain"),
+                    "sigma0_valid": gene_summary.get("sigma0_valid"),
+                    "sigma0_floored": gene_summary.get("sigma0_floored"),
+                    "fallback_applied": gene_summary.get("fallback_applied"),
                     "eii_z_raw": gene_summary.get("eii_z_raw"),
                     "eii_01_raw": gene_summary.get("eii_01_raw"),
                     "ceii_gene": gene_summary.get("ceii_gene"),
@@ -901,6 +919,9 @@ def main() -> int:
                     "calibration_unavailable_reason": "",
                     "nearest_supported_regime": "",
                     "distance_to_supported_domain": "",
+                    "sigma0_valid": "",
+                    "sigma0_floored": "",
+                    "fallback_applied": "",
                     "eii_z_raw": "",
                     "eii_01_raw": "",
                     "ceii_gene": "",
@@ -959,6 +980,9 @@ def main() -> int:
         "calibration_unavailable_reason",
         "nearest_supported_regime",
         "distance_to_supported_domain",
+        "sigma0_valid",
+        "sigma0_floored",
+        "fallback_applied",
         "eii_z_raw",
         "eii_01_raw",
         "ceii_gene",
