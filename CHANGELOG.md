@@ -29,8 +29,9 @@
   plus fitting utility `scripts/fit_ceii_calibration.py`.
 - Updated manuscript and docs to separate:
   raw EII magnitude, calibrated cEII probability, and matched-neutral q-based significance.
-- Build metadata now uses a single source of truth for versioning via
-  `babappai.metadata.SOFTWARE_VERSION`.
+- Build metadata now uses a single source of truth for versioning at
+  `pyproject.toml` `[project].version`, with runtime reporting synchronized
+  through `babappai.metadata.resolve_software_version()`.
 - Added version integrity tests to enforce agreement between runtime version,
   build metadata, and CLI-reported version.
 - Added CI and publish workflows with gated `test -> build -> publish` flow,
