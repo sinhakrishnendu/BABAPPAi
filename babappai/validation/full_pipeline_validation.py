@@ -22,6 +22,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
+from babappai.metadata import SOFTWARE_VERSION
 from babappai.run_pipeline import run_and_write_outputs
 from babappai.stats import annotate_bh_qvalues, bh_adjust
 
@@ -2065,7 +2066,7 @@ def generate_manuscript_outputs(
 
     release_notes_text = "\n".join(
         [
-            "# BABAPPAi 1.1.0 Validation Release Notes",
+            f"# BABAPPAi {SOFTWARE_VERSION} Validation Release Notes",
             "",
             "- Primary inferential decision layer now uses empirical Monte Carlo p-values and BH-adjusted q-values.",
             "- EII metrics remain diagnostic effect-size style outputs.",

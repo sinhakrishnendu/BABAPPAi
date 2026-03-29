@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.0.1 - 2026-03-29
+
+- Set `pyproject.toml` `[project].version` to `2.0.1` as the canonical package version source.
+- Updated runtime metadata to resolve software version from installed package metadata, falling back to `pyproject.toml` in source mode.
+- Added release workflow tag guard to fail when tag and package versions diverge.
+- Added release workflow diagnostics for source version, `GITHUB_REF_NAME`, and built `dist/` contents.
+- Hardened publish build step with explicit clean build directories before sdist/wheel generation.
+- Upgraded publish workflow action majors for Node 24 runtime compatibility while preserving trusted PyPI publishing.
+
 - Locked `D_obs` definition to a single statistic:
   sample variance (`ddof=1`) of `site_logit_mean` across codon sites.
 - Added empirical cEII calibration framework:

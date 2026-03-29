@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import re
 import subprocess
 import sys
@@ -12,38 +11,17 @@ import babappai.cli as cli
 from babappai import __version__
 
 
-def _get_section(text: str, section_name: str) -> str:
-    pattern = rf"(?ms)^\[{re.escape(section_name)}\]\n(.*?)(?=^\[|\Z)"
-    match = re.search(pattern, text)
-    if not match:
-        raise AssertionError(f"Missing [{section_name}] in pyproject.toml")
-    return match.group(1)
-
-
-def _resolve_pyproject_version(pyproject_path: Path) -> str:
+def _read_pyproject_version(pyproject_path: Path) -> str:
     text = pyproject_path.read_text(encoding="utf-8")
-    project_section = _get_section(text, "project")
-    static_match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', project_section)
-    if static_match:
-        return static_match.group(1)
-
-    dynamic_section = _get_section(text, "tool.setuptools.dynamic")
-    dynamic_match = re.search(
-        r'(?m)^version\s*=\s*\{\s*attr\s*=\s*"([^"]+)"\s*\}\s*$',
-        dynamic_section,
-    )
-    if not dynamic_match:
-        raise AssertionError("Could not resolve dynamic version attr from pyproject.toml")
-
-    attr_path = dynamic_match.group(1)
-    module_name, attr_name = attr_path.rsplit(".", 1)
-    module = importlib.import_module(module_name)
-    return str(getattr(module, attr_name))
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', text)
+    if not match:
+        raise AssertionError("Could not find static [project].version in pyproject.toml")
+    return match.group(1)
 
 
 def test_pyproject_version_matches_runtime_version():
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert _resolve_pyproject_version(pyproject) == __version__
+    assert _read_pyproject_version(pyproject) == __version__
 
 
 def test_installed_metadata_version_matches_runtime_version():

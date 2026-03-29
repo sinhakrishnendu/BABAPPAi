@@ -1,8 +1,16 @@
-"""Canonical metadata for BABAPPAi and legacy frozen assets."""
+"""Canonical metadata for BABAPPAi and legacy frozen assets.
+
+The package version source of truth is ``[project].version`` in ``pyproject.toml``.
+"""
+
+from __future__ import annotations
+
+import re
+from importlib import metadata as importlib_metadata
+from pathlib import Path
 
 PACKAGE_NAME = "babappai"
 SOFTWARE_NAME = "BABAPPAi"
-SOFTWARE_VERSION = "1.1.0"
 SOFTWARE_DOI = "10.5281/zenodo.18520163"
 
 LEGACY_CODEBASE_NAME = "BABAPPAΩ"
@@ -17,3 +25,28 @@ MODEL_COMPATIBILITY_NOTE = (
     "The cached frozen model is a legacy BABAPPAΩ asset used for "
     "backward-compatible inference until BABAPPAi-specific weights are released."
 )
+
+
+def _read_pyproject_version() -> str:
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    text = pyproject_path.read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', text)
+    if not match:
+        raise RuntimeError("Could not find [project].version in pyproject.toml")
+    return match.group(1)
+
+
+def resolve_software_version() -> str:
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject_path.exists():
+        return _read_pyproject_version()
+
+    try:
+        return importlib_metadata.version(PACKAGE_NAME)
+    except importlib_metadata.PackageNotFoundError:
+        raise RuntimeError(
+            "Could not resolve software version from pyproject.toml or installed package metadata"
+        )
+
+
+SOFTWARE_VERSION = resolve_software_version()
