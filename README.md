@@ -10,6 +10,14 @@ BABAPPAi is the software framework built around the **canonical frozen BABAPPAΩ
 - **BABAPPAΩ**: fixed neural inference artifact (weights are immutable in this project).
 - **BABAPPAi**: operational package around that model (raw EII, matched-neutral significance, applicability/abstention, optional cEII calibration, reporting, and packaging).
 
+## 0) Final Submission Folder
+
+For manuscript submission handoff, use the consolidated folder:
+
+- `final/`
+
+It contains the cleaned main manuscript files, supplementary files, cover letter, reviewer/metadata files, and packaged zip assembled for NAR Genomics and Bioinformatics submission.
+
 ## 1) Scope
 
 BABAPPAi reports:
@@ -78,7 +86,7 @@ babappai model status
 babappai model verify
 babappai doctor
 babappai version
-babappai version --ceii-asset babappai/data/ceii_calibration_v2.json
+babappai version --ceii-asset babappai/data/ceii_calibration_v3_2.json
 ```
 
 ### Significance-related options

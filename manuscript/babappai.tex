@@ -22,7 +22,7 @@ Assistant Professor, Department of Zoology, Jhargram Raj College, Jhargram 72150
 \maketitle
 
 \begin{abstract}
-Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi targets this identifiability question and separates it from adaptation claims while using a fixed neural inference backbone: the canonical frozen BABAPPA$\Omega$ model artifact. We lock the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(W_{0.05}(\overline{\ell}_i))$, where $\overline{\ell}_i$ is the site-level mean branch logit and $W_{0.05}$ denotes two-sided 5\% winsorization, and define raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. We further implement a conditional calibration layer, $c\mathrm{EII}_{\mathrm{gene/site}}=P(I=1\mid S,A=\text{applicable},\texttt{ceii\_v3.2})$, with strict abstention outside validated applicability support. However, under the current held-out calibration benchmark, applicable-case reliability remains insufficiently stable for cEII to serve as a central manuscript endpoint. Accordingly, the primary claims are based on raw EII and matched-neutral significance ($p_{\mathrm{emp}},q_{\mathrm{emp}}$) with explicit applicability-aware abstention, while cEII is retained as an auxiliary, versioned post-inference diagnostic. This yields a stable fixed-model inference stack with honest uncertainty handling that complements, but does not replace, classical branch--site hypothesis tests.
+Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi targets this identifiability question and separates it from adaptation claims while using a fixed neural inference backbone: the canonical frozen BABAPPA$\Omega$ model artifact. This work locks the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(W_{0.05}(\overline{\ell}_i))$, where $\overline{\ell}_i$ is the site-level mean branch logit and $W_{0.05}$ denotes two-sided 5\% winsorization, and defines raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. A conditional calibration layer is further implemented, $c\mathrm{EII}_{\mathrm{gene/site}}=P(I=1\mid S,A=\text{applicable},\texttt{ceii\_v3.2})$, with strict abstention outside validated applicability support. However, under the current held-out calibration benchmark, applicable-case reliability remains insufficiently stable for cEII to serve as a central manuscript endpoint. Accordingly, the primary claims are based on raw EII and matched-neutral significance ($p_{\mathrm{emp}},q_{\mathrm{emp}}$) with explicit applicability-aware abstention, while cEII is retained as an auxiliary, versioned post-inference diagnostic. This yields a stable fixed-model inference stack with honest uncertainty handling that complements, but does not replace, classical branch--site hypothesis tests.
 \end{abstract}
 
 \noindent\textbf{Keywords:} episodic selection; branch--site evolution; likelihood-free inference; simulation-based inference; mutation--selection models; phylogenomics
@@ -121,7 +121,7 @@ At inference time, BABAPPAi returns branch--site deviation scores, site-level bu
 
 \subsection{Episodic Identifiability Index}
 
-We lock one dispersion definition for all validation and release outputs:
+One dispersion definition is locked for all validation and release outputs:
 \[
 D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}\!\left(W_{0.05}(\overline{\ell}_i)\right), \qquad
 \overline{\ell}_i=\frac{1}{|\mathcal{B}|}\sum_{b\in\mathcal{B}}\ell_{i,b},
@@ -137,7 +137,7 @@ Raw EII is defined as
 \]
 Raw EII is an effect-size-style dispersion magnitude, not a probability.
 
-To separate ``signal exists'' from ``signal recoverable'', we define truth-aware recoverability targets on held-out simulations:
+To separate ``signal exists'' from ``signal recoverable'', truth-aware recoverability targets are defined on held-out simulations:
 \[
 R_{\mathrm{gene}}=0.45\cdot \widetilde{\rho}_{\mathrm{branch}}
 +0.35\cdot S_{\mathrm{burden}}
@@ -274,7 +274,7 @@ Raw EII remained a useful continuous dispersion score but was not directly inter
 
 \subsection{Reliability and operating characteristics}
 
-For \texttt{ceii\_v3.2}, held-out calibration artifacts (\texttt{ceii\_reliability.tsv}, \texttt{ceii\_split\_performance.tsv}) were generated with full sigma-valid coverage (fraction sigma-valid $=1.0$; sigma-floor collapse $=0.0$). However, the current held-out applicable splits are label-sparse (test/OOD positive rates for $I_{\mathrm{gene}}$ and $I_{\mathrm{site}}$ were near zero in this benchmark instance), which limits interpretability of probability reliability as a primary endpoint. We therefore treat these reliability diagnostics as provisional and do not elevate cEII to the main claim in this manuscript revision.
+For \texttt{ceii\_v3.2}, held-out calibration artifacts (\texttt{ceii\_reliability.tsv}, \texttt{ceii\_split\_performance.tsv}) were generated with full sigma-valid coverage (fraction sigma-valid $=1.0$; sigma-floor collapse $=0.0$). However, the current held-out applicable splits are label-sparse (test/OOD positive rates for $I_{\mathrm{gene}}$ and $I_{\mathrm{site}}$ were near zero in this benchmark instance), which limits interpretability of probability reliability as a primary endpoint. These reliability diagnostics are therefore treated as provisional and cEII is not elevated to the main claim in this manuscript revision.
 
 \subsection{Failure analysis and abstention under unsupported regimes}
 
