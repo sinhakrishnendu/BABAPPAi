@@ -53,6 +53,104 @@ def _subset(rows: List[Mapping[str, Any]], split: str) -> List[Mapping[str, Any]
     return [r for r in rows if str(r.get("split", "")) == split]
 
 
+def _signal_present_from_truth(row: Mapping[str, Any], *, min_true_burden: float) -> bool:
+    true_gene_burden = _safe_float(row.get("true_gene_burden", row.get("latent_cell_fraction_realized")))
+    if np.isfinite(true_gene_burden):
+        return bool(float(true_gene_burden) > float(min_true_burden))
+    regime = str(row.get("regime", "")).strip().lower()
+    if regime in {"neutral", "near_neutral"}:
+        return False
+    if regime:
+        return True
+    return False
+
+
+def _derive_excess_gate_from_train(
+    rows: List[Mapping[str, Any]],
+    *,
+    min_true_burden: float = 0.01,
+    neutral_fpr_target: float = 0.10,
+) -> Dict[str, float]:
+    train_rows = _subset(rows, "train")
+    if not train_rows:
+        train_rows = list(rows)
+
+    neutral_rows = [
+        r
+        for r in train_rows
+        if not _signal_present_from_truth(r, min_true_burden=float(min_true_burden))
+    ]
+    if not neutral_rows:
+        neutral_rows = list(train_rows)
+
+    q_neutral = np.asarray(
+        [
+            np.clip(_safe_float(r.get("q_emp")), 0.0, 1.0)
+            for r in neutral_rows
+            if np.isfinite(_safe_float(r.get("q_emp")))
+        ],
+        dtype=float,
+    )
+    dr_neutral = np.asarray(
+        [
+            max(_safe_float(r.get("dispersion_ratio")), 0.0)
+            for r in neutral_rows
+            if np.isfinite(_safe_float(r.get("dispersion_ratio")))
+        ],
+        dtype=float,
+    )
+    eii_neutral = np.asarray(
+        [
+            np.clip(_safe_float(r.get("eii_01_raw", r.get("EII_01"))), 0.0, 1.0)
+            for r in neutral_rows
+            if np.isfinite(_safe_float(r.get("eii_01_raw", r.get("EII_01"))))
+        ],
+        dtype=float,
+    )
+
+    nfpr = float(np.clip(float(neutral_fpr_target), 0.01, 0.49))
+    q_gate = float(np.quantile(q_neutral, nfpr)) if q_neutral.size > 0 else 0.50
+    dr_gate = float(np.quantile(dr_neutral, 1.0 - nfpr)) if dr_neutral.size > 0 else 1.05
+    eii_gate = float(np.quantile(eii_neutral, 1.0 - nfpr)) if eii_neutral.size > 0 else 0.55
+
+    # Stabilize thresholds to avoid degenerate gates from tiny neutral subsets.
+    q_gate = float(np.clip(q_gate, 0.02, 0.95))
+    dr_gate = float(np.clip(dr_gate, 1.00, 4.00))
+    eii_gate = float(np.clip(eii_gate, 0.50, 0.95))
+    neglog10_q_gate = float(-np.log10(max(q_gate, 1e-12)))
+
+    # Composite evidence score gate derived from neutral controls.
+    scores = []
+    for r in neutral_rows:
+        qv = _safe_float(r.get("q_emp"))
+        drv = _safe_float(r.get("dispersion_ratio"))
+        eii = _safe_float(r.get("eii_01_raw", r.get("EII_01")))
+        if not (np.isfinite(qv) and np.isfinite(drv) and np.isfinite(eii)):
+            continue
+        qv = float(np.clip(qv, 0.0, 1.0))
+        drv = max(float(drv), 0.0)
+        eii = float(np.clip(eii, 0.0, 1.0))
+        q_term = float(np.clip((-np.log10(max(qv, 1e-12))) / 3.0, 0.0, 1.0))
+        dr_term = float(np.clip((drv - 1.0) / 2.0, 0.0, 1.0))
+        eii_term = float(np.clip((eii - 0.5) / 0.5, 0.0, 1.0))
+        scores.append(float(np.clip(0.50 * q_term + 0.30 * dr_term + 0.20 * eii_term, 0.0, 1.0)))
+    score_neutral = np.asarray(scores, dtype=float)
+    score_gate = float(np.quantile(score_neutral, 1.0 - nfpr)) if score_neutral.size > 0 else 0.35
+    score_gate = float(np.clip(score_gate, 0.10, 0.95))
+
+    return {
+        "min_true_burden_for_signal_present": float(min_true_burden),
+        "neutral_fpr_target": nfpr,
+        "max_q_emp_for_identifiable": q_gate,
+        "min_neglog10_q_emp_for_identifiable": neglog10_q_gate,
+        "min_dispersion_ratio_for_identifiable": dr_gate,
+        "min_eii_01_for_identifiable": eii_gate,
+        "min_excess_evidence_score_for_identifiable": score_gate,
+        "n_train_rows": int(len(train_rows)),
+        "n_neutral_rows_for_gate": int(len(neutral_rows)),
+    }
+
+
 def _safe_float(value: Any) -> float:
     try:
         out = float(value)
@@ -493,10 +591,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--metrics-tsv", required=True)
     p.add_argument("--outdir", required=True)
-    p.add_argument("--calibration-version", default="ceii_v2")
+    p.add_argument("--calibration-version", default="ceii_v3.1")
     p.add_argument("--tau-gene", type=float, default=None)
     p.add_argument("--tau-site", type=float, default=None)
-    p.add_argument("--label-profile", choices=["auto", "v2", "v3"], default="auto")
+    p.add_argument("--label-profile", choices=["auto", "v2", "v3", "v3_1"], default="auto")
+    p.add_argument("--excess-neutral-fpr-target", type=float, default=0.10)
+    p.add_argument("--signal-present-min-true-burden", type=float, default=0.01)
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
     p.add_argument("--target-fdr-site", type=float, default=0.10)
     p.add_argument("--bootstrap-reps", type=int, default=200)
@@ -531,12 +631,42 @@ def main() -> int:
 
     label_profile = str(args.label_profile)
     if label_profile == "auto":
-        label_profile = "v3" if calibration_version.startswith("ceii_v3") else "v2"
-    tau_gene = float(args.tau_gene) if args.tau_gene is not None else (0.50 if label_profile == "v3" else 0.42)
-    tau_site = float(args.tau_site) if args.tau_site is not None else (0.55 if label_profile == "v3" else 0.45)
+        if calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
+            label_profile = "v3_1"
+        elif calibration_version.startswith("ceii_v3"):
+            label_profile = "v3"
+        else:
+            label_profile = "v2"
+    tau_gene = float(args.tau_gene) if args.tau_gene is not None else 0.42
+    tau_site = float(args.tau_site) if args.tau_site is not None else 0.45
 
     attach_scenario_stability(augmented)
-    if label_profile == "v3":
+    if label_profile == "v3_1":
+        assign_scenario_splits(augmented, seed=int(args.seed))
+        evidence_gate = _derive_excess_gate_from_train(
+            augmented,
+            min_true_burden=float(args.signal_present_min_true_burden),
+            neutral_fpr_target=float(args.excess_neutral_fpr_target),
+        )
+        attach_recoverability_targets(
+            augmented,
+            tau_gene=tau_gene,
+            tau_site=tau_site,
+            rank_nan_fallback_gene=0.0,
+            rank_nan_fallback_site=0.0,
+            gene_weights=(0.55, 0.30, 0.15),
+            site_weights=(0.50, 0.35, 0.15),
+            use_stability_gating=True,
+            require_excess_over_neutral_for_identifiable=True,
+            max_q_emp_for_identifiable=float(evidence_gate["max_q_emp_for_identifiable"]),
+            min_neglog10_q_emp_for_identifiable=float(evidence_gate["min_neglog10_q_emp_for_identifiable"]),
+            min_dispersion_ratio_for_identifiable=float(evidence_gate["min_dispersion_ratio_for_identifiable"]),
+            min_eii_01_for_identifiable=float(evidence_gate["min_eii_01_for_identifiable"]),
+            min_excess_evidence_score_for_identifiable=float(
+                evidence_gate["min_excess_evidence_score_for_identifiable"]
+            ),
+        )
+    elif label_profile == "v3":
         attach_recoverability_targets(
             augmented,
             tau_gene=tau_gene,
@@ -553,7 +683,8 @@ def main() -> int:
             tau_gene=tau_gene,
             tau_site=tau_site,
         )
-    assign_scenario_splits(augmented, seed=int(args.seed))
+    if label_profile != "v3_1":
+        assign_scenario_splits(augmented, seed=int(args.seed))
 
     # cEII calibration is valid only when the null-dispersion layer was numerically valid.
     # Keep all rows for traceability, but fit/evaluate calibration on sigma-valid rows only.
@@ -771,7 +902,33 @@ def main() -> int:
         )
 
     target_definitions: Dict[str, str]
-    if label_profile == "v3":
+    if label_profile == "v3_1":
+        gate_lines = [
+            f"q_emp <= {float(evidence_gate['max_q_emp_for_identifiable']):.4f}",
+            (
+                f"(dispersion_ratio >= {float(evidence_gate['min_dispersion_ratio_for_identifiable']):.4f} "
+                f"OR eii_01_raw >= {float(evidence_gate['min_eii_01_for_identifiable']):.4f})"
+            ),
+            f"excess_evidence_score >= {float(evidence_gate['min_excess_evidence_score_for_identifiable']):.4f}",
+        ]
+        target_definitions = {
+            "R_gene": (
+                "0.55*branch_rank_norm + 0.30*burden_alignment + "
+                "0.15*(scenario_branch_stability * max(branch_rank_norm, burden_alignment)); "
+                "NaN branch rank fallback=0.0"
+            ),
+            "R_site": (
+                "0.50*site_enrichment_at_k + 0.35*site_rank_norm + "
+                "0.15*(scenario_site_stability * max(site_enrichment_at_k, site_rank_norm)); "
+                "NaN site rank fallback=0.0"
+            ),
+            "excess_over_neutral_gate": " AND ".join(gate_lines),
+            "I_gene_recovery_only": f"1 if R_gene >= {tau_gene:.2f} else 0",
+            "I_site_recovery_only": f"1 if R_site >= {tau_site:.2f} else 0",
+            "I_gene": f"1 if (I_gene_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0",
+            "I_site": f"1 if (I_site_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0",
+        }
+    elif label_profile == "v3":
         target_definitions = {
             "R_gene": (
                 "0.55*branch_rank_norm + 0.30*burden_alignment + "
@@ -879,6 +1036,7 @@ def main() -> int:
             },
             "n_rows_total": int(len(augmented)),
             "n_rows_sigma_valid": int(len(valid_rows)),
+            "evidence_gate": evidence_gate if label_profile == "v3_1" else {},
         },
     }
 
@@ -941,7 +1099,9 @@ def main() -> int:
     )
 
     if args.write_package_asset:
-        if calibration_version.startswith("ceii_v3"):
+        if calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
+            pkg_name = "ceii_calibration_v3_1.json"
+        elif calibration_version.startswith("ceii_v3"):
             pkg_name = "ceii_calibration_v3.json"
         elif calibration_version.startswith("ceii_v2"):
             pkg_name = "ceii_calibration_v2.json"

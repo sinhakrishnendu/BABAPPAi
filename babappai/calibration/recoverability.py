@@ -6,7 +6,7 @@ import csv
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
 import numpy as np
 
@@ -211,6 +211,12 @@ def attach_recoverability_targets(
     gene_weights: Sequence[float] = (0.45, 0.35, 0.20),
     site_weights: Sequence[float] = (0.45, 0.35, 0.20),
     use_stability_gating: bool = False,
+    require_excess_over_neutral_for_identifiable: bool = False,
+    max_q_emp_for_identifiable: Optional[float] = None,
+    min_neglog10_q_emp_for_identifiable: Optional[float] = None,
+    min_dispersion_ratio_for_identifiable: Optional[float] = None,
+    min_eii_01_for_identifiable: Optional[float] = None,
+    min_excess_evidence_score_for_identifiable: Optional[float] = None,
 ) -> List[MutableMapping[str, Any]]:
     if len(gene_weights) != 3 or len(site_weights) != 3:
         raise ValueError("gene_weights and site_weights must each contain exactly 3 values.")
@@ -271,10 +277,110 @@ def attach_recoverability_targets(
             )
         )
 
+        q_emp = float(row.get("q_emp", 1.0) or 1.0)
+        if not np.isfinite(q_emp):
+            q_emp = 1.0
+        q_emp = float(np.clip(q_emp, 0.0, 1.0))
+        neglog10_q_emp = float(-math.log10(max(q_emp, 1e-12)))
+
+        dispersion_ratio = float(row.get("dispersion_ratio", float("nan")))
+        if not np.isfinite(dispersion_ratio):
+            d_obs = float(row.get("D_obs", float("nan")))
+            mu0 = float(row.get("mu0", float("nan")))
+            if np.isfinite(d_obs) and np.isfinite(mu0) and mu0 > 0:
+                dispersion_ratio = float(d_obs / mu0)
+            else:
+                dispersion_ratio = 0.0
+        dispersion_ratio = max(float(dispersion_ratio), 0.0)
+
+        eii_01 = float(row.get("eii_01_raw", row.get("EII_01", float("nan"))))
+        if not np.isfinite(eii_01):
+            eii_z = float(row.get("eii_z_raw", row.get("EII_z", float("nan"))))
+            if np.isfinite(eii_z):
+                eii_01 = float(1.0 / (1.0 + np.exp(-np.clip(eii_z, -60.0, 60.0))))
+            else:
+                eii_01 = 0.0
+        eii_01 = float(np.clip(eii_01, 0.0, 1.0))
+
+        q_term = float(np.clip(neglog10_q_emp / 3.0, 0.0, 1.0))
+        dr_term = float(np.clip((dispersion_ratio - 1.0) / 2.0, 0.0, 1.0))
+        eii_term = float(np.clip((eii_01 - 0.5) / 0.5, 0.0, 1.0))
+        excess_evidence_score = float(np.clip(0.50 * q_term + 0.30 * dr_term + 0.20 * eii_term, 0.0, 1.0))
+
+        pass_q = True
+        if max_q_emp_for_identifiable is not None:
+            pass_q = pass_q and (q_emp <= float(max_q_emp_for_identifiable))
+        if min_neglog10_q_emp_for_identifiable is not None:
+            pass_q = pass_q and (neglog10_q_emp >= float(min_neglog10_q_emp_for_identifiable))
+
+        pass_dispersion = True
+        if min_dispersion_ratio_for_identifiable is not None:
+            pass_dispersion = bool(dispersion_ratio >= float(min_dispersion_ratio_for_identifiable))
+
+        pass_eii = True
+        if min_eii_01_for_identifiable is not None:
+            pass_eii = bool(eii_01 >= float(min_eii_01_for_identifiable))
+
+        pass_score = True
+        if min_excess_evidence_score_for_identifiable is not None:
+            pass_score = bool(excess_evidence_score >= float(min_excess_evidence_score_for_identifiable))
+
+        has_secondary_gate = (
+            min_dispersion_ratio_for_identifiable is not None
+            or min_eii_01_for_identifiable is not None
+        )
+        if has_secondary_gate:
+            excess_gate_pass = bool(pass_q and (pass_dispersion or pass_eii) and pass_score)
+        else:
+            excess_gate_pass = bool(pass_q and pass_score)
+
+        i_gene_recovery_only = int(r_gene >= float(tau_gene))
+        i_site_recovery_only = int(r_site >= float(tau_site))
+        if require_excess_over_neutral_for_identifiable:
+            i_gene = int(bool(i_gene_recovery_only and excess_gate_pass))
+            i_site = int(bool(i_site_recovery_only and excess_gate_pass))
+        else:
+            i_gene = i_gene_recovery_only
+            i_site = i_site_recovery_only
+
         row["R_gene"] = r_gene
         row["R_site"] = r_site
-        row["I_gene"] = int(r_gene >= float(tau_gene))
-        row["I_site"] = int(r_site >= float(tau_site))
+        row["I_gene_recovery_only"] = int(i_gene_recovery_only)
+        row["I_site_recovery_only"] = int(i_site_recovery_only)
+        row["I_gene"] = int(i_gene)
+        row["I_site"] = int(i_site)
+        row["require_excess_over_neutral_for_identifiable"] = bool(require_excess_over_neutral_for_identifiable)
+        row["target_gate_q_emp"] = float(q_emp)
+        row["target_gate_neglog10_q_emp"] = float(neglog10_q_emp)
+        row["target_gate_dispersion_ratio"] = float(dispersion_ratio)
+        row["target_gate_eii_01_raw"] = float(eii_01)
+        row["target_gate_excess_evidence_score"] = float(excess_evidence_score)
+        row["target_gate_pass_q"] = bool(pass_q)
+        row["target_gate_pass_dispersion_ratio"] = bool(pass_dispersion)
+        row["target_gate_pass_eii_01_raw"] = bool(pass_eii)
+        row["target_gate_pass_score"] = bool(pass_score)
+        row["target_gate_pass_overall"] = bool(excess_gate_pass)
+        row["target_gate_max_q_emp_for_identifiable"] = (
+            float(max_q_emp_for_identifiable) if max_q_emp_for_identifiable is not None else ""
+        )
+        row["target_gate_min_neglog10_q_emp_for_identifiable"] = (
+            float(min_neglog10_q_emp_for_identifiable)
+            if min_neglog10_q_emp_for_identifiable is not None
+            else ""
+        )
+        row["target_gate_min_dispersion_ratio_for_identifiable"] = (
+            float(min_dispersion_ratio_for_identifiable)
+            if min_dispersion_ratio_for_identifiable is not None
+            else ""
+        )
+        row["target_gate_min_eii_01_for_identifiable"] = (
+            float(min_eii_01_for_identifiable) if min_eii_01_for_identifiable is not None else ""
+        )
+        row["target_gate_min_excess_evidence_score_for_identifiable"] = (
+            float(min_excess_evidence_score_for_identifiable)
+            if min_excess_evidence_score_for_identifiable is not None
+            else ""
+        )
         row["R_gene_branch_rank"] = float(branch_rank)
         row["R_gene_burden_alignment"] = float(burden_align)
         row["R_gene_stability_term"] = float(gene_stability_term)

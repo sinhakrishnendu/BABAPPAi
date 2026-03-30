@@ -44,6 +44,7 @@ CODONS: List[str] = [
 ]
 
 NUCLEOTIDES = np.array(["A", "C", "G", "T"], dtype="U1")
+STOP_CODONS = {"TAA", "TAG", "TGA"}
 
 
 # Regime specification kept faithful to existing neutral/low/medium/high framing.
@@ -116,7 +117,7 @@ RATE_HETEROGENEITY_BINS: Dict[str, float] = {
     "high": 0.70,
 }
 
-DEFAULT_DISPERSION_CHOICES = ("site_logit_variance",)
+DEFAULT_DISPERSION_CHOICES = (PRIMARY_DISPERSION_METHOD,)
 
 
 @dataclass(frozen=True)
@@ -385,6 +386,28 @@ def _codon_matrix_to_sequences(
                 if rng.random() < alignment_noise_rate:
                     pool = NUCLEOTIDES[NUCLEOTIDES != char]
                     seq_chars[i] = str(pool[int(rng.integers(0, pool.shape[0]))])
+
+            # Keep simulated alignments encodable by BABAPPAi (61 sense codons + '---').
+            # Nucleotide-level noise can create stops; repair those codons deterministically.
+            n_codons = int(codon_indices.shape[0])
+            for j in range(n_codons):
+                start = 3 * j
+                codon = "".join(seq_chars[start : start + 3])
+                if codon in STOP_CODONS:
+                    original = CODONS[int(codon_indices[j])]
+                    candidates: List[str] = []
+                    for pos in range(3):
+                        for nuc in NUCLEOTIDES.tolist():
+                            if nuc == codon[pos]:
+                                continue
+                            cand = codon[:pos] + str(nuc) + codon[pos + 1 :]
+                            if cand in CODONS:
+                                candidates.append(cand)
+                    if candidates:
+                        repaired = candidates[int(rng.integers(0, len(candidates)))]
+                    else:
+                        repaired = original
+                    seq_chars[start : start + 3] = list(repaired)
         sequences[taxon] = "".join(seq_chars)
     return sequences
 
@@ -435,10 +458,10 @@ def simulate_alignment_validation_dataset(
         raise ValueError("n_replicates_per_scenario must be > 0.")
     if not dispersion_choices:
         raise ValueError("dispersion_choices must be non-empty.")
-    unsupported = [x for x in dispersion_choices if x != "site_logit_variance"]
+    unsupported = [x for x in dispersion_choices if x != PRIMARY_DISPERSION_METHOD]
     if unsupported:
         raise ValueError(
-            "Only 'site_logit_variance' is supported for D_obs in the locked method. "
+            f"Only '{PRIMARY_DISPERSION_METHOD}' is supported for D_obs in the locked method. "
             f"Unsupported values: {sorted(set(unsupported))}"
         )
 

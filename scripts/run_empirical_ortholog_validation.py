@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -24,6 +25,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+# Ensure local repository package imports are preferred over stale site-packages installs.
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -37,6 +44,7 @@ from babappai.input_qc import (
     deduplicate_species_records,
     validate_alignment_tree_preflight,
 )
+from babappai.model_manager import get_cache_dir as get_babappai_cache_dir
 
 STOP_CODONS = {"TAA", "TAG", "TGA"}
 EXPECTED_CONTROL_CLASS: Dict[str, str] = {
@@ -86,6 +94,47 @@ def run_cmd(
     return proc.stdout
 
 
+def prepare_offline_runtime_env(*, outdir: Path, log_path: Path) -> Dict[str, str]:
+    """Create and return a strict offline runtime environment for external tools."""
+    cache_root = outdir / "cache"
+    babappalign_cache = cache_root / "babappalign"
+    embeddings_cache = babappalign_cache / "embeddings"
+    hf_home = Path.home() / ".cache" / "huggingface"
+    hf_hub_cache = hf_home / "hub"
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    babappalign_cache.mkdir(parents=True, exist_ok=True)
+    embeddings_cache.mkdir(parents=True, exist_ok=True)
+    hf_home.mkdir(parents=True, exist_ok=True)
+    hf_hub_cache.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    babappai_cache_dir = str(get_babappai_cache_dir())
+    env["XDG_CACHE_HOME"] = str(cache_root)
+    env["BABAPPAI_CACHE_DIR"] = babappai_cache_dir
+    env["HF_HOME"] = str(hf_home)
+    env["HUGGINGFACE_HUB_CACHE"] = str(hf_hub_cache)
+    env["TRANSFORMERS_CACHE"] = str(hf_hub_cache)
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
+    env["HF_DATASETS_OFFLINE"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+
+    append_log(
+        log_path,
+        (
+            "offline_runtime="
+            f"XDG_CACHE_HOME:{cache_root}; "
+            f"BABAPPAI_CACHE_DIR:{babappai_cache_dir}; "
+            f"babappalign_embeddings:{embeddings_cache}; "
+            f"HF_HOME:{hf_home}; "
+            f"HUGGINGFACE_HUB_CACHE:{hf_hub_cache}; "
+            "HF_HUB_OFFLINE:1; TRANSFORMERS_OFFLINE:1; HF_DATASETS_OFFLINE:1"
+        ),
+    )
+    return env
+
+
 def numeric_or_none(value: Any) -> Optional[float]:
     try:
         if value is None:
@@ -116,6 +165,17 @@ def write_table(path: Path, rows: List[Dict[str, Any]], fieldnames: List[str], d
                 else:
                     out[key] = val
             writer.writerow(out)
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def find_existing_tree_for_fasta(fasta_path: Path) -> Optional[Path]:
@@ -302,7 +362,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-calibration", type=int, default=200)
     p.add_argument("--neutral-reps", type=int, default=200)
     p.add_argument("--device", default="cpu", choices=["cpu", "auto", "cuda"])
-    p.add_argument("--ceii-asset", default=None, help="Optional cEII calibration asset JSON passed to babappai run.")
+    p.add_argument(
+        "--ceii-asset",
+        required=True,
+        help="Required cEII calibration asset JSON path passed to babappai run.",
+    )
     p.add_argument(
         "--genes",
         default="",
@@ -717,9 +781,27 @@ def main() -> int:
 
     os.environ["MPLCONFIGDIR"] = str(mpl_cache)
 
+    requested_ceii_asset = Path(args.ceii_asset).expanduser().resolve()
+    if not requested_ceii_asset.exists():
+        raise FileNotFoundError(f"Requested cEII asset does not exist: {requested_ceii_asset}")
+    requested_asset_payload = load_calibration_asset(requested_ceii_asset)
+    requested_calibration_version = str(requested_asset_payload.get("calibration_version", "unknown"))
+    requested_asset_sha256 = file_sha256(requested_ceii_asset)
+    requested_asset_basename = requested_ceii_asset.name
+
     append_log(run_log, "Starting empirical ortholog validation run")
     append_log(run_log, f"ortholog_dir={ortholog_dir}")
     append_log(run_log, f"outdir={outdir}")
+    append_log(
+        run_log,
+        (
+            "requested_ceii_asset="
+            f"path:{requested_ceii_asset}; "
+            f"basename:{requested_asset_basename}; "
+            f"sha256:{requested_asset_sha256}; "
+            f"calibration_version:{requested_calibration_version}"
+        ),
+    )
     append_log(
         run_log,
         (
@@ -728,8 +810,14 @@ def main() -> int:
             f"babappalign_model:{args.babappalign_model}"
         ),
     )
+    if not Path(args.babappalign_model).expanduser().exists():
+        raise FileNotFoundError(
+            f"babappalign model file not found: {args.babappalign_model}. "
+            "For offline runs, ensure this checkpoint is present locally."
+        )
+    offline_env = prepare_offline_runtime_env(outdir=outdir, log_path=run_log)
 
-    envelope = resolve_applicability_envelope(args.ceii_asset)
+    envelope = resolve_applicability_envelope(str(requested_ceii_asset))
     n_taxa_lo, n_taxa_hi = envelope.get("n_taxa", (None, None))
     gene_len_lo, gene_len_hi = envelope.get("gene_length_nt", (None, None))
     append_log(
@@ -806,14 +894,6 @@ def main() -> int:
             codon_alignment_path = gene_work / f"{gene}.sanitized.codon.aln.fasta"
             alignment_needed = bool(sanitize_stats["alignment_needed"])
             if alignment_needed:
-                env = os.environ.copy()
-                env["XDG_CACHE_HOME"] = str(outdir / "cache")
-                env["HF_HOME"] = str(Path.home() / ".cache/huggingface")
-                env["HUGGINGFACE_HUB_CACHE"] = str(Path.home() / ".cache/huggingface/hub")
-                env["TRANSFORMERS_CACHE"] = str(Path.home() / ".cache/huggingface/hub")
-                env["HF_HUB_OFFLINE"] = "1"
-                env["TRANSFORMERS_OFFLINE"] = "1"
-                (outdir / "cache").mkdir(parents=True, exist_ok=True)
                 run_cmd(
                     [
                         args.babappalign,
@@ -826,7 +906,7 @@ def main() -> int:
                         "cpu",
                     ],
                     log_path=run_log,
-                    env=env,
+                    env=offline_env,
                 )
                 if not codon_alignment_path.exists():
                     raise FileNotFoundError(f"Expected codon alignment not found: {codon_alignment_path}")
@@ -935,18 +1015,63 @@ def main() -> int:
                 str(args.neutral_reps),
                 "--overwrite",
             ]
-            if args.ceii_asset:
-                run_cmd_args.extend(["--ceii-asset", str(args.ceii_asset)])
-            run_cmd(run_cmd_args, log_path=run_log)
+            run_cmd_args.extend(["--ceii-asset", str(requested_ceii_asset)])
+            run_cmd(run_cmd_args, log_path=run_log, env=offline_env)
             result_path = run_out / "results.json"
             if not result_path.exists():
                 raise FileNotFoundError(f"BABAPPAi results missing: {result_path}")
 
             copied_json = outdir / f"{gene}.results.json"
-            shutil.copy2(result_path, copied_json)
-
             payload = json.loads(result_path.read_text())
             gene_summary = payload.get("gene_summary", {})
+            runtime_asset_path_raw = (
+                payload.get("calibration", {}).get("ceii_asset_path")
+                or gene_summary.get("ceii_asset_path")
+            )
+            if not runtime_asset_path_raw:
+                raise RuntimeError(
+                    f"{gene}: runtime result missing ceii_asset_path in calibration/gene_summary"
+                )
+            runtime_asset_path = Path(str(runtime_asset_path_raw)).expanduser().resolve()
+            if runtime_asset_path != requested_ceii_asset:
+                raise RuntimeError(
+                    f"{gene}: runtime cEII asset mismatch. "
+                    f"requested={requested_ceii_asset}, runtime={runtime_asset_path}"
+                )
+
+            runtime_calibration_version = str(gene_summary.get("calibration_version", ""))
+            if runtime_calibration_version != requested_calibration_version:
+                raise RuntimeError(
+                    f"{gene}: calibration_version mismatch. "
+                    f"requested_asset_version={requested_calibration_version}, runtime={runtime_calibration_version}"
+                )
+
+            payload.setdefault("calibration", {})
+            payload["calibration"]["ceii_asset_path"] = str(requested_ceii_asset)
+            payload["calibration"]["ceii_asset_basename"] = requested_asset_basename
+            payload["calibration"]["ceii_asset_sha256"] = requested_asset_sha256
+            payload["calibration"]["requested_calibration_version"] = requested_calibration_version
+            payload.setdefault("gene_summary", {})
+            payload["gene_summary"]["ceii_asset_path"] = str(requested_ceii_asset)
+            payload["gene_summary"]["ceii_asset_basename"] = requested_asset_basename
+            payload["gene_summary"]["ceii_asset_sha256"] = requested_asset_sha256
+            payload["gene_summary"]["calibration_version"] = runtime_calibration_version
+            copied_json.write_text(json.dumps(payload, indent=2) + "\n")
+
+            copied_payload = json.loads(copied_json.read_text())
+            copied_path = Path(
+                str(
+                    copied_payload.get("calibration", {}).get("ceii_asset_path")
+                    or copied_payload.get("gene_summary", {}).get("ceii_asset_path")
+                    or ""
+                )
+            ).expanduser().resolve()
+            copied_ver = str(copied_payload.get("gene_summary", {}).get("calibration_version", ""))
+            if copied_path != requested_ceii_asset or copied_ver != requested_calibration_version:
+                raise RuntimeError(
+                    f"{gene}: copied JSON calibration proof mismatch after write "
+                    f"(path={copied_path}, version={copied_ver})"
+                )
 
             n_taxa = int(sanitize_stats["sanitized_taxon_count"])
             gene_len_nt = int(sanitize_stats["sanitized_length_median"])
@@ -1032,6 +1157,9 @@ def main() -> int:
                     "q_emp": gene_summary.get("q_emp"),
                     "significant_bool": gene_summary.get("significant_bool"),
                     "calibration_version": gene_summary.get("calibration_version"),
+                    "ceii_asset_path": str(requested_ceii_asset),
+                    "ceii_asset_basename": requested_asset_basename,
+                    "ceii_asset_sha256": requested_asset_sha256,
                     "model_version": gene_summary.get("model_version"),
                     "model_checkpoint_provenance": gene_summary.get("model_checkpoint_provenance"),
                     "domain_shift_or_applicability": gene_summary.get("domain_shift_or_applicability"),
@@ -1102,6 +1230,9 @@ def main() -> int:
                     "q_emp": "",
                     "significant_bool": "",
                     "calibration_version": "",
+                    "ceii_asset_path": str(requested_ceii_asset),
+                    "ceii_asset_basename": requested_asset_basename,
+                    "ceii_asset_sha256": requested_asset_sha256,
                     "model_version": "",
                     "model_checkpoint_provenance": "",
                     "domain_shift_or_applicability": "",
@@ -1169,6 +1300,9 @@ def main() -> int:
         "q_emp",
         "significant_bool",
         "calibration_version",
+        "ceii_asset_path",
+        "ceii_asset_basename",
+        "ceii_asset_sha256",
         "model_version",
         "model_checkpoint_provenance",
         "domain_shift_or_applicability",

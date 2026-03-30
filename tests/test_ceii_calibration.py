@@ -334,3 +334,29 @@ def test_ceii_v3_probability_is_monotone_with_evidence() -> None:
     )
     assert float(strong["ceii_gene"]) >= float(weak["ceii_gene"])
     assert float(strong["ceii_site"]) >= float(weak["ceii_site"])
+
+
+def test_ceii_v3_applicability_gate_uses_support_not_evidence() -> None:
+    asset = _toy_v3_evidence_asset()
+    weak_q = apply_ceii_calibration(
+        eii_z_raw=0.4,
+        n_taxa=24,
+        gene_length_nt=1200,
+        n_branches=45,
+        q_emp=1.0,
+        dispersion_ratio=0.8,
+        sigma0_final=0.2,
+        asset=asset,
+    )
+    strong_q = apply_ceii_calibration(
+        eii_z_raw=0.4,
+        n_taxa=24,
+        gene_length_nt=1200,
+        n_branches=45,
+        q_emp=1e-6,
+        dispersion_ratio=3.2,
+        sigma0_final=0.2,
+        asset=asset,
+    )
+    assert weak_q["applicability_status"] == strong_q["applicability_status"] == "in_domain"
+    assert abs(float(weak_q["applicability_score"]) - float(strong_q["applicability_score"])) < 1e-12

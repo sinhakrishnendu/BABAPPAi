@@ -18,6 +18,9 @@ D_OBS_DEFINITION = (
 
 def default_calibration_asset_path() -> Path:
     data_dir = Path(__file__).resolve().parent.parent / "data"
+    v3_1 = data_dir / "ceii_calibration_v3_1.json"
+    if v3_1.exists():
+        return v3_1
     v3 = data_dir / "ceii_calibration_v3.json"
     if v3.exists():
         return v3
@@ -599,32 +602,48 @@ def apply_ceii_calibration(
     extra_covariates: Optional[Mapping[str, float]] = None,
     asset: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    covars: Dict[str, float] = {}
+    support_covars: Dict[str, float] = {}
+    evidence_covars: Dict[str, float] = {}
+    reserved_evidence_keys = {
+        "q_emp",
+        "neglog10_q_emp",
+        "dispersion_ratio",
+        "dispersion_ratio_clipped",
+        "sigma0_final",
+        "sigma0_inverse",
+        "eii_z_raw",
+        "eii_01_raw",
+        "eii_z_clipped",
+    }
     if extra_covariates:
         for k, v in extra_covariates.items():
             fv = _safe_float(v)
             if fv is not None:
-                covars[str(k)] = float(fv)
+                key = str(k)
+                if key in reserved_evidence_keys:
+                    evidence_covars[key] = float(fv)
+                else:
+                    support_covars[key] = float(fv)
     if n_branches is not None and np.isfinite(float(n_branches)):
-        covars["n_branches"] = float(n_branches)
+        support_covars["n_branches"] = float(n_branches)
     qv = _safe_float(q_emp)
     if qv is not None:
-        covars["q_emp"] = float(qv)
-        covars["neglog10_q_emp"] = float(-math.log10(max(min(qv, 1.0), 1e-12)))
+        evidence_covars["q_emp"] = float(qv)
+        evidence_covars["neglog10_q_emp"] = float(-math.log10(max(min(qv, 1.0), 1e-12)))
     drv = _safe_float(dispersion_ratio)
     if drv is not None:
-        covars["dispersion_ratio"] = float(max(drv, 0.0))
-        covars["dispersion_ratio_clipped"] = float(np.clip(max(drv, 0.0), 0.0, 10.0))
+        evidence_covars["dispersion_ratio"] = float(max(drv, 0.0))
+        evidence_covars["dispersion_ratio_clipped"] = float(np.clip(max(drv, 0.0), 0.0, 10.0))
     s0 = _safe_float(sigma0_final)
     if s0 is not None:
-        covars["sigma0_final"] = float(max(s0, 0.0))
-        covars["sigma0_inverse"] = float(1.0 / max(float(s0), 1e-8))
+        evidence_covars["sigma0_final"] = float(max(s0, 0.0))
+        evidence_covars["sigma0_inverse"] = float(1.0 / max(float(s0), 1e-8))
 
     applicability_meta = evaluate_applicability(
         n_taxa=int(n_taxa),
         gene_length_nt=int(gene_length_nt),
         asset=asset,
-        extra_covariates=covars,
+        extra_covariates=support_covars,
     )
 
     thresholds = asset.get("thresholds", {})
@@ -656,7 +675,7 @@ def apply_ceii_calibration(
         q_emp=q_emp,
         dispersion_ratio=dispersion_ratio,
         sigma0_final=sigma0_final,
-        extra_covariates=covars,
+        extra_covariates={**support_covars, **evidence_covars},
     )
     p_gene, gene_low, gene_high = _predict_target_probability(
         target="gene",

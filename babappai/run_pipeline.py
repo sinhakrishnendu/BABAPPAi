@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shlex
 from datetime import datetime, timezone
@@ -45,6 +46,17 @@ def _write_tsv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) ->
             writer.writerow(row)
 
 
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def run_and_write_outputs(
     *,
     alignment_path: str,
@@ -73,6 +85,15 @@ def run_and_write_outputs(
     neutral_generator_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
+    resolved_ceii_asset_path: Optional[Path] = None
+    ceii_asset_sha256: Optional[str] = None
+    ceii_asset_basename: Optional[str] = None
+    if ceii_enabled and ceii_asset_path:
+        resolved_ceii_asset_path = Path(ceii_asset_path).expanduser().resolve()
+        if not resolved_ceii_asset_path.exists():
+            raise FileNotFoundError(f"Requested cEII asset does not exist: {resolved_ceii_asset_path}")
+        ceii_asset_sha256 = _file_sha256(resolved_ceii_asset_path)
+        ceii_asset_basename = resolved_ceii_asset_path.name
 
     outputs = {
         "results_json": outdir / "results.json",
@@ -112,7 +133,7 @@ def run_and_write_outputs(
         retain_eii_bands=retain_eii_bands,
         report_threshold_bands=report_threshold_bands,
         ceii_enabled=ceii_enabled,
-        ceii_asset_path=ceii_asset_path,
+        ceii_asset_path=str(resolved_ceii_asset_path) if resolved_ceii_asset_path is not None else ceii_asset_path,
     )
 
     gene = result["gene_level_identifiability"]
@@ -167,7 +188,13 @@ def run_and_write_outputs(
             "retain_eii_bands": bool(retain_eii_bands),
             "report_threshold_bands": bool(report_threshold_bands),
             "ceii_enabled": bool(ceii_enabled),
-            "ceii_asset_path": str(ceii_asset_path) if ceii_asset_path else None,
+            "ceii_asset_path": (
+                str(resolved_ceii_asset_path)
+                if resolved_ceii_asset_path is not None
+                else (str(ceii_asset_path) if ceii_asset_path else None)
+            ),
+            "ceii_asset_basename": ceii_asset_basename,
+            "ceii_asset_sha256": ceii_asset_sha256,
             "neutral_generator": neutral_generator_metadata,
             "neutral_replicates_tsv": str(outputs["neutral_calibration_replicates_tsv"]),
         },
@@ -177,6 +204,9 @@ def run_and_write_outputs(
         "warnings": result.get("warnings", []),
         "outputs": {k: str(v) for k, v in outputs.items()},
     }
+    payload["gene_summary"]["ceii_asset_path"] = payload["calibration"]["ceii_asset_path"]
+    payload["gene_summary"]["ceii_asset_basename"] = payload["calibration"]["ceii_asset_basename"]
+    payload["gene_summary"]["ceii_asset_sha256"] = payload["calibration"]["ceii_asset_sha256"]
 
     _write_json(outputs["results_json"], payload)
 

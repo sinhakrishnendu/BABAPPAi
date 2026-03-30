@@ -22,7 +22,7 @@ Assistant Professor, Department of Zoology, Jhargram Raj College, Jhargram 72150
 \maketitle
 
 \begin{abstract}
-Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi targets this identifiability question and separates it from adaptation claims while using a fixed neural inference backbone: the canonical frozen BABAPPA$\Omega$ model artifact. We lock the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(W_{0.05}(\overline{\ell}_i))$, where $\overline{\ell}_i$ is the site-level mean branch logit and $W_{0.05}$ denotes two-sided 5\% winsorization, and define raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. We then calibrate raw EII on held-out simulator truth \emph{conditionally on applicability}: $c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \text{data},A_{\mathrm{gene}}=\text{applicable},\texttt{ceii\_v2})$ and $c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \text{data},A_{\mathrm{site}}=\text{applicable},\texttt{ceii\_v2})$. Outside validated support, BABAPPAi abstains from calibrated probability output and reports explicit applicability diagnostics instead. Recoverability targets are truth-aware composites of site enrichment, site/branch rank agreement, burden alignment, and replicate-stability terms, with pre-registered binary labels for gene- and site-scale identifiability. Calibration uses a two-stage design (applicability gate + monotone score calibration) on a dedicated calibration split with separate test and regime-holdout (OOD) evaluation. Matched-neutral significance remains a distinct inferential layer via empirical $p_{\mathrm{emp}}$ and BH-adjusted $q_{\mathrm{emp}}$. In the current locked benchmark, gene-scale calibration was more stable than site-scale calibration, and OOD degradation was strongest for site localization under high nuisance regimes. The contribution is therefore a stable fixed-model inference stack plus honest post-inference calibration/abstention semantics that complement, but do not replace, classical branch--site hypothesis tests.
+Branch--site analyses are often interpreted as evidence for episodic positive selection, but a prior question is whether episodic structure is \emph{recoverable} from the available alignment. BABAPPAi targets this identifiability question and separates it from adaptation claims while using a fixed neural inference backbone: the canonical frozen BABAPPA$\Omega$ model artifact. We lock the raw dispersion statistic as $D_{\mathrm{obs}}=\mathrm{Var}_{\mathrm{ddof}=1}(W_{0.05}(\overline{\ell}_i))$, where $\overline{\ell}_i$ is the site-level mean branch logit and $W_{0.05}$ denotes two-sided 5\% winsorization, and define raw $ \mathrm{EII}_z=(D_{\mathrm{obs}}-\mu_0)/\sigma_0 $ under matched-neutral Monte Carlo calibration. We then calibrate raw EII on held-out simulator truth \emph{conditionally on applicability}: $c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid S_{\mathrm{gene}},A_{\mathrm{gene}}=\text{applicable},\texttt{ceii\_v3.1})$ and $c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid S_{\mathrm{site}},A_{\mathrm{site}}=\text{applicable},\texttt{ceii\_v3.1})$, where $S$ is a monotone evidence score. Outside validated support, BABAPPAi abstains from calibrated probability output and reports explicit applicability diagnostics instead. Recoverability targets are truth-aware composites of site enrichment, site/branch rank agreement, burden alignment, and replicate-stability terms, with binary labels additionally gated by nontrivial excess over matched-neutral expectation. Calibration uses a two-stage design (support-only applicability gate + evidence-only monotone score calibration) on a dedicated calibration split with separate test and regime-holdout (OOD) evaluation. Matched-neutral significance remains a distinct inferential layer via empirical $p_{\mathrm{emp}}$ and BH-adjusted $q_{\mathrm{emp}}$. In the current locked benchmark, gene-scale calibration was more stable than site-scale calibration, and OOD degradation was strongest for site localization under high nuisance regimes. The contribution is therefore a stable fixed-model inference stack plus honest post-inference calibration/abstention semantics that complement, but do not replace, classical branch--site hypothesis tests.
 \end{abstract}
 
 \noindent\textbf{Keywords:} episodic selection; branch--site evolution; likelihood-free inference; simulation-based inference; mutation--selection models; phylogenomics
@@ -150,28 +150,47 @@ R_{\mathrm{site}}=0.45\cdot E@k_{\mathrm{site}}
 \]
 where $\widetilde{\rho}=(\rho+1)/2$ is normalized Spearman rank agreement, $S_{\mathrm{burden}}$ is burden-alignment score, $E@k_{\mathrm{site}}$ is site enrichment at truth-derived $k$, and $S_{\mathrm{stab}}$ terms summarize replicate robustness.
 
-Pre-registered binary identifiability labels are
+Recoverability-only binary labels are
 \[
-I_{\mathrm{gene}}=\mathbf{1}[R_{\mathrm{gene}}\ge \tau_{\mathrm{gene}}], \quad
+I_{\mathrm{gene}}^{\mathrm{rec}}=\mathbf{1}[R_{\mathrm{gene}}\ge \tau_{\mathrm{gene}}], \quad
 \tau_{\mathrm{gene}}=0.42,
 \]
 \[
-I_{\mathrm{site}}=\mathbf{1}[R_{\mathrm{site}}\ge \tau_{\mathrm{site}}], \quad
+I_{\mathrm{site}}^{\mathrm{rec}}=\mathbf{1}[R_{\mathrm{site}}\ge \tau_{\mathrm{site}}], \quad
 \tau_{\mathrm{site}}=0.45.
 \]
-By design, $I_{\mathrm{site}}$ is stricter in the benchmarked domain.
+Final calibration targets additionally require nontrivial excess over matched-neutral expectation:
+\[
+G_{\mathrm{excess}}=\mathbf{1}\!\left[q_{\mathrm{emp}}\le q^\star \ \wedge \
+\left(\mathrm{dispersion\_ratio}\ge r^\star \ \vee\ \mathrm{EII}_{01,\mathrm{raw}}\ge e^\star\right)\right],
+\]
+\[
+I_{\mathrm{gene}}=I_{\mathrm{gene}}^{\mathrm{rec}}\cdot G_{\mathrm{excess}}, \qquad
+I_{\mathrm{site}}=I_{\mathrm{site}}^{\mathrm{rec}}\cdot G_{\mathrm{excess}}.
+\]
+Gate constants $(q^\star,r^\star,e^\star)$ are derived from neutral-control distributions in the training split only.
 
-Calibration in \texttt{ceii\_v2} is two-stage. Stage 1 is an applicability function $A(x)$ over covariates $x$ (minimum: taxa count and gene length; optional additional run covariates):
+Calibration in \texttt{ceii\_v3.1} is two-stage. Stage 1 is an applicability function $A(x)$ over support variables only (minimum: taxa count and gene length; optional branch-count and missingness support variables):
 \[
 A(x)\in\{\texttt{in\_domain},\texttt{near\_boundary},\texttt{out\_of\_domain}\}.
 \]
-Only \texttt{in\_domain} samples are calibrated by default. Stage 2 fits a monotone mapping on a learned linear score from $(\mathrm{EII}_{z,\mathrm{raw}},X)$:
+Only \texttt{in\_domain} samples are calibrated by default.
+
+Stage 2 uses evidence variables only:
 \[
-c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X,A_{\mathrm{gene}}=\texttt{in\_domain},\texttt{ceii\_v2}),
+z=\big(\mathrm{EII}_{01,\mathrm{raw}},\ \mathrm{clip}(\mathrm{EII}_{z,\mathrm{raw}}),\ -\log_{10}(q_{\mathrm{emp}}+\epsilon),\ \mathrm{dispersion\_ratio}\big),
 \]
 \[
-c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid \mathrm{EII}_{z,\mathrm{raw}},X,A_{\mathrm{site}}=\texttt{in\_domain},\texttt{ceii\_v2}).
+S=\sum_j w_j f_j(z_j), \qquad w_j\ge 0,
 \]
+followed by isotonic calibration on held-out calibration data:
+\[
+c\mathrm{EII}_{\mathrm{gene}}=P(I_{\mathrm{gene}}=1\mid S_{\mathrm{gene}},A_{\mathrm{gene}}=\texttt{in\_domain},\texttt{ceii\_v3.1}),
+\]
+\[
+c\mathrm{EII}_{\mathrm{site}}=P(I_{\mathrm{site}}=1\mid S_{\mathrm{site}},A_{\mathrm{site}}=\texttt{in\_domain},\texttt{ceii\_v3.1}).
+\]
+Support variables determine whether calibration is allowed; evidence variables determine the probability.
 When $A\neq \texttt{in\_domain}$ (or applicability is insufficient), BABAPPAi abstains:
 \[
 c\mathrm{EII}_{\mathrm{gene}}=\varnothing,\qquad c\mathrm{EII}_{\mathrm{site}}=\varnothing,
@@ -215,9 +234,9 @@ $\mu_0,\sigma_0$ & Mean and SD of matched-neutral $D$ replicates. \\
 $\mathrm{EII}_{z,\mathrm{raw}}$ & Raw standardized dispersion $(D_{\mathrm{obs}}-\mu_0)/\sigma_0$. \\
 $\mathrm{EII}_{01,\mathrm{raw}}$ & $\sigma(\mathrm{EII}_{z,\mathrm{raw}})$, bounded transform of raw EII. \\
 $R_{\mathrm{gene}},R_{\mathrm{site}}$ & Continuous recoverability composites from truth-aware metrics. \\
-$I_{\mathrm{gene}},I_{\mathrm{site}}$ & Binary recoverability labels from pre-registered thresholds. \\
+$I_{\mathrm{gene}},I_{\mathrm{site}}$ & Binary identifiability labels requiring recoverability criteria and excess-over-neutral gate. \\
 $A(x)$ & Applicability function for calibrated output validity (\texttt{in\_domain}/\texttt{near\_boundary}/\texttt{out\_of\_domain}). \\
-$c\mathrm{EII}_{\mathrm{gene}},c\mathrm{EII}_{\mathrm{site}}$ & Conditional calibrated $P(I=1\mid\text{data},A=\texttt{in\_domain},\texttt{ceii\_v2})$; otherwise abstain ($\varnothing$). \\
+$c\mathrm{EII}_{\mathrm{gene}},c\mathrm{EII}_{\mathrm{site}}$ & Conditional calibrated $P(I=1\mid\text{evidence},A=\texttt{in\_domain},\texttt{ceii\_v3.1})$; otherwise abstain ($\varnothing$). \\
 $p_{\mathrm{emp}},q_{\mathrm{emp}}$ & Matched-neutral exceedance significance and BH-adjusted q-value. \\
 \hline
 \end{tabular}
@@ -251,7 +270,7 @@ The locked expanded benchmark used 80 simulated genes with strict scenario-level
 
 \subsection{Raw EII versus calibrated cEII}
 
-Raw EII remained a useful continuous dispersion score but was not directly interpretable as identifiability probability. Under the revised \texttt{ceii\_v2} path, calibrated output is conditional on both applicability support and numerically valid neutral dispersion. The legacy \texttt{ceii\_v1} behavior that emitted a flat fallback value is no longer used for inference claims; in the revised runtime, unsupported inputs receive raw EII + matched-neutral significance with explicit \texttt{calibration\_unavailable} metadata rather than forced numeric cEII.
+Raw EII remained a useful continuous dispersion score but was not directly interpretable as identifiability probability. Under the revised \texttt{ceii\_v3.1} path, calibrated output is conditional on both applicability support and numerically valid neutral dispersion, and is constrained by an evidence-monotone calibration map. The legacy \texttt{ceii\_v1} behavior that emitted a flat fallback value is no longer used for inference claims; in the revised runtime, unsupported inputs receive raw EII + matched-neutral significance with explicit \texttt{calibration\_unavailable} metadata rather than forced numeric cEII.
 
 \subsection{Reliability and operating characteristics}
 
@@ -261,7 +280,7 @@ On held-out test data, gene-scale calibration yielded Brier $=0.291$ and ECE $=0
 
 Before the publication-path refactor, the expanded benchmark run using frozen-reference neutral lookup showed complete collapse of the null layer: $\texttt{fraction\_sigma0\_at\_floor}=1.0$, $\texttt{fraction\_fallback\_applied}=1.0$, and only 19/80 finite pre-floor $\sigma_0$ values. Audit of case-level failures showed two dominant modes: \texttt{missing\_neutral\_reference} (61/80) and \texttt{neutral\_group\_below\_minimum} (19/80). This confirms that the prior run operated outside valid neutral support and should not be used for calibrated cEII claims.
 
-After replacing the force-calibration path with empirical matched-neutral calibration and abstention-aware semantics (\texttt{ceii\_v2}, winsorized dispersion, $\sigma$ floor $=10^{-3}$), the same expanded benchmark yielded $\texttt{fraction\_sigma0\_at\_floor}=0.0$ and $\texttt{fraction\_fallback\_applied}=0.0$ with full sigma-valid coverage (80/80). This behavior underpins the release interpretation: cEII is emitted only when calibration assumptions are satisfied, and abstention is an explicit safeguard against false certainty.
+After replacing the force-calibration path with empirical matched-neutral calibration and abstention-aware semantics (\texttt{ceii\_v3.1}, winsorized dispersion, $\sigma$ floor $=10^{-3}$), the same expanded benchmark yielded $\texttt{fraction\_sigma0\_at\_floor}=0.0$ and $\texttt{fraction\_fallback\_applied}=0.0$ with full sigma-valid coverage (80/80). This behavior underpins the release interpretation: cEII is emitted only when calibration assumptions are satisfied, and abstention is an explicit safeguard against false certainty.
 
 \subsection{Empirical applicability and abstention behavior}
 

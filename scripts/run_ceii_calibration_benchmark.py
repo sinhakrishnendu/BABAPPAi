@@ -127,7 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--neutral-reps", type=int, default=200)
     p.add_argument("--min-neutral-group-size", type=int, default=20)
-    p.add_argument("--calibration-version", default="ceii_v2")
+    p.add_argument("--calibration-version", default="ceii_v3.1")
+    p.add_argument("--label-profile", choices=["auto", "v2", "v3", "v3_1"], default="auto")
+    p.add_argument("--excess-neutral-fpr-target", type=float, default=0.10)
+    p.add_argument("--signal-present-min-true-burden", type=float, default=0.01)
     p.add_argument("--bootstrap-reps", type=int, default=200)
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
     p.add_argument("--target-fdr-site", type=float, default=0.10)
@@ -184,6 +187,12 @@ def main() -> int:
         str(calibration_dir),
         "--calibration-version",
         str(args.calibration_version),
+        "--label-profile",
+        str(args.label_profile),
+        "--excess-neutral-fpr-target",
+        str(float(args.excess_neutral_fpr_target)),
+        "--signal-present-min-true-burden",
+        str(float(args.signal_present_min_true_burden)),
         "--bootstrap-reps",
         str(int(args.bootstrap_reps)),
         "--target-fdr-gene",

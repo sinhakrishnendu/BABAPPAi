@@ -31,8 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset-tsv",
         default="results/validation/ceii_benchmark_v2_expanded/dataset/synthetic_dataset.tsv",
     )
-    p.add_argument("--outdir", default="results/validation/ceii_v2")
-    p.add_argument("--calibration-version", default="ceii_v2")
+    p.add_argument("--outdir", default="results/validation/ceii_v3_1")
+    p.add_argument("--calibration-version", default="ceii_v3.1")
     p.add_argument("--dispersion-method", default=PRIMARY_DISPERSION_METHOD)
     p.add_argument("--device", default="cpu")
     p.add_argument("--batch-size", type=int, default=1)
@@ -87,6 +87,8 @@ def main() -> int:
         str(calibration_dir),
         "--calibration-version",
         str(args.calibration_version),
+        "--label-profile",
+        "v3_1",
         "--bootstrap-reps",
         "200",
         "--seed",
