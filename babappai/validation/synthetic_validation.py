@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from babappai.calibration.neutral_generator_adapter import run_neutral_generator
+from babappai.metadata import MODEL_TAG
 from babappai.run_pipeline import run_and_write_outputs
 from babappai.stats import annotate_bh_qvalues
 from babappai.validation.simulator_adapter import run_simulator
@@ -89,7 +90,7 @@ def run_synthetic_validation(
         neutral_meta = run_neutral_generator(
             generator_path=neutral_generator_path,
             output_dir=str(out / "neutral_generator"),
-            model_tag="legacy_frozen",
+            model_tag=MODEL_TAG,
             seed=seed,
             extra_args=[],
         )
@@ -232,7 +233,7 @@ def run_synthetic_validation(
         "alpha_used": float(alpha),
         "pvalue_mode": pvalue_mode,
         "provenance_note": (
-            "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase."
+            "BABAPPAi uses the canonical frozen BABAPPAΩ model as its fixed inference backbone."
         ),
     }
     (out / "synthetic_summary.json").write_text(json.dumps(summary, indent=2) + "\n")

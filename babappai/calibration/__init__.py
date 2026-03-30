@@ -15,7 +15,12 @@ def _get_data_dir() -> Path:
 
 
 def _get_reference_path(model_tag: str) -> Path:
-    if model_tag in {"legacy_frozen", "frozen"}:
+    if model_tag in {
+        "frozen_babappaomega_model",
+        "canonical_frozen_model",
+        "legacy_frozen",
+        "frozen",
+    }:
         suffix = "frozen"
     else:
         suffix = model_tag
@@ -99,7 +104,7 @@ __all__ = [
     "lookup_interpolated",
 ]
 
-# cEII calibration helpers are imported lazily for backward compatibility.
+# cEII calibration helpers are imported lazily for compatibility with lightweight installs.
 try:  # pragma: no cover - import availability is validated in dedicated tests.
     from babappai.calibration.ceii import (
         D_OBS_DEFINITION,

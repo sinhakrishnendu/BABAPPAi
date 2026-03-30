@@ -51,10 +51,27 @@ def encode_alignment(alignment_path):
 
     X = np.full((ntaxa, L), PAD_ID, dtype=np.int64)
 
+    invalid_examples = []
+    invalid_count = 0
     for i, s in enumerate(seqs):
         for j in range(0, len(s), 3):
             codon = s[j:j+3]
             if codon in CODON_TO_ID:
                 X[i, j // 3] = CODON_TO_ID[codon]
+                continue
+            if codon == "---":
+                X[i, j // 3] = PAD_ID
+                continue
+            invalid_count += 1
+            if len(invalid_examples) < 10:
+                invalid_examples.append(
+                    f"{records[i].id}:site={j // 3 + 1}:codon={codon}"
+                )
+
+    if invalid_count > 0:
+        raise ValueError(
+            "Alignment contains unsupported codon triplets. Allowed: 61 sense codons and '---' PAD gap triplets. "
+            f"invalid_triplets={invalid_count}; examples={'; '.join(invalid_examples)}"
+        )
 
     return X, ntaxa, L

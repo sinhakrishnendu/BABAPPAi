@@ -5,16 +5,23 @@
 [![CI](https://github.com/krishnendusinha/babappai/actions/workflows/ci.yml/badge.svg)](https://github.com/krishnendusinha/babappai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-BABAPPAi is the renamed continuation of the BABAPPAΩ codebase.
-It is a diagnostic framework for branch-site recoverability/identifiability under matched neutral calibration.
+BABAPPAi is the software framework built around the **canonical frozen BABAPPAΩ model**.
+
+- **BABAPPAΩ**: fixed neural inference artifact (weights are immutable in this project).
+- **BABAPPAi**: operational package around that model (raw EII, matched-neutral significance, applicability/abstention, optional cEII calibration, reporting, and packaging).
 
 ## 1) Scope
 
 BABAPPAi reports:
 
 - raw dispersion diagnostics: `eii_z_raw`, `eii_01_raw`
-- empirically calibrated identifiability probabilities: `ceii_gene`, `ceii_site`
+- empirically calibrated identifiability probabilities (conditional): `ceii_gene`, `ceii_site`
 - empirical matched-neutral significance: `p_emp`, `q_emp`, `significant_bool`
+
+Important interpretation contract:
+- raw EII and matched-neutral significance are universally reportable outputs
+- cEII is an auxiliary post-inference calibration layer and may be withheld (`null`) under inapplicable/unstable regimes
+- calibration updates do **not** imply model-weight changes
 
 BABAPPAi does **not** perform classical dN/dS likelihood-ratio testing, and significance does **not** prove adaptive substitution.
 
@@ -57,6 +64,10 @@ For each gene-level run:
 - `ceii_*`: recoverability/identifiability probability calibration
 - `q_emp`: excess-dispersion significance under matched-neutral calibration
 
+`ceii_*` is conditional and abstention-aware:
+- if applicability/null checks fail, `ceii_gene` and `ceii_site` are withheld (`null`)
+- this does not invalidate raw EII or matched-neutral significance
+
 ## 5) Core CLI
 
 ```bash
@@ -67,13 +78,13 @@ babappai model status
 babappai model verify
 babappai doctor
 babappai version
-babappai version --ceii-asset babappai/data/ceii_calibration_v1.json
+babappai version --ceii-asset babappai/data/ceii_calibration_v2.json
 ```
 
 ### Significance-related options
 
 - `--alpha` (default `0.05`)
-- `--pvalue-mode` (`empirical_monte_carlo` default; `frozen_reference` legacy fallback)
+- `--pvalue-mode` (`empirical_monte_carlo` default; `frozen_reference` static reference-table mode)
 - `--neutral-reps` (Monte Carlo neutral replicates)
 - `--min-neutral-group-size`
 - `--sigma-floor`
@@ -141,12 +152,12 @@ Validation runs add calibration/significance tables, bootstrap summaries, figure
 
 - neutral replicate distributions used for `p_emp` are written to disk
 - run metadata includes software version, model DOI/SHA, calibration settings, and command provenance
-- BABAPPAi remains the renamed continuation of BABAPPAΩ; legacy model assets are explicitly labeled as such
+- model provenance identifies BABAPPAΩ as the canonical frozen inference backbone used by BABAPPAi
 
 ## 9) Citation and interpretation guardrails
 
 - cite BABAPPAi software version
-- cite legacy model DOI while legacy frozen assets are used
+- cite the BABAPPAΩ model DOI as the canonical frozen model artifact
 - interpret significance as excess dispersion relative to matched neutral calibration, not as proof of adaptation
 
 ## 10) Development

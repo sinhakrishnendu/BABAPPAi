@@ -206,11 +206,35 @@ def attach_recoverability_targets(
     *,
     tau_gene: float = 0.42,
     tau_site: float = 0.45,
+    rank_nan_fallback_gene: float = 0.5,
+    rank_nan_fallback_site: float = 0.5,
+    gene_weights: Sequence[float] = (0.45, 0.35, 0.20),
+    site_weights: Sequence[float] = (0.45, 0.35, 0.20),
+    use_stability_gating: bool = False,
 ) -> List[MutableMapping[str, Any]]:
+    if len(gene_weights) != 3 or len(site_weights) != 3:
+        raise ValueError("gene_weights and site_weights must each contain exactly 3 values.")
+    gw = np.asarray(gene_weights, dtype=float)
+    sw = np.asarray(site_weights, dtype=float)
+    if not np.isfinite(gw).all() or not np.isfinite(sw).all():
+        raise ValueError("gene/site recoverability weights must be finite.")
+    if np.any(gw < 0) or np.any(sw < 0):
+        raise ValueError("gene/site recoverability weights must be nonnegative.")
+    if float(np.sum(gw)) <= 0 or float(np.sum(sw)) <= 0:
+        raise ValueError("gene/site recoverability weights must sum to > 0.")
+    gw = gw / np.sum(gw)
+    sw = sw / np.sum(sw)
+
     for row in rows:
         site_enrich = float(row.get("site_enrichment_at_k", float("nan")))
-        site_rank = _normalize_rank_metric(float(row.get("site_spearman", float("nan"))), neutral_fallback=0.5)
-        branch_rank = _normalize_rank_metric(float(row.get("branch_spearman", float("nan"))), neutral_fallback=0.5)
+        site_rank = _normalize_rank_metric(
+            float(row.get("site_spearman", float("nan"))),
+            neutral_fallback=float(rank_nan_fallback_site),
+        )
+        branch_rank = _normalize_rank_metric(
+            float(row.get("branch_spearman", float("nan"))),
+            neutral_fallback=float(rank_nan_fallback_gene),
+        )
         burden_align = float(row.get("burden_alignment_score", float("nan")))
         site_stab = float(row.get("scenario_site_stability", 1.0))
         branch_stab = float(row.get("scenario_branch_stability", 1.0))
@@ -224,13 +248,39 @@ def attach_recoverability_targets(
         if not np.isfinite(branch_stab):
             branch_stab = 0.5
 
-        r_gene = float(np.clip(0.45 * branch_rank + 0.35 * burden_align + 0.20 * branch_stab, 0.0, 1.0))
-        r_site = float(np.clip(0.45 * site_enrich + 0.35 * site_rank + 0.20 * site_stab, 0.0, 1.0))
+        if use_stability_gating:
+            # Stability should not dominate when evidence itself is weak.
+            gene_stability_term = float(np.clip(branch_stab * max(branch_rank, burden_align), 0.0, 1.0))
+            site_stability_term = float(np.clip(site_stab * max(site_enrich, site_rank), 0.0, 1.0))
+        else:
+            gene_stability_term = float(np.clip(branch_stab, 0.0, 1.0))
+            site_stability_term = float(np.clip(site_stab, 0.0, 1.0))
+
+        r_gene = float(
+            np.clip(
+                gw[0] * branch_rank + gw[1] * burden_align + gw[2] * gene_stability_term,
+                0.0,
+                1.0,
+            )
+        )
+        r_site = float(
+            np.clip(
+                sw[0] * site_enrich + sw[1] * site_rank + sw[2] * site_stability_term,
+                0.0,
+                1.0,
+            )
+        )
 
         row["R_gene"] = r_gene
         row["R_site"] = r_site
         row["I_gene"] = int(r_gene >= float(tau_gene))
         row["I_site"] = int(r_site >= float(tau_site))
+        row["R_gene_branch_rank"] = float(branch_rank)
+        row["R_gene_burden_alignment"] = float(burden_align)
+        row["R_gene_stability_term"] = float(gene_stability_term)
+        row["R_site_enrichment"] = float(site_enrich)
+        row["R_site_rank"] = float(site_rank)
+        row["R_site_stability_term"] = float(site_stability_term)
     return rows
 
 

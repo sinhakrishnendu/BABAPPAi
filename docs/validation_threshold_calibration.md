@@ -30,7 +30,7 @@ Across tested genes:
   - neutral significant rate (empirical FPR proxy)
   - regime-specific significant rates (low/medium/high)
   - q-based FPR, TPR, balanced accuracy
-- raw EII threshold summaries are retained only as legacy descriptive comparison
+- raw EII threshold summaries are retained only as descriptive compatibility comparison
 - sigma calibration diagnostics:
   - `sigma0_raw` vs `sigma0_final`
   - floor usage fraction

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Repositioned BABAPPAi semantics around a fixed canonical model architecture:
+  - BABAPPAΩ is now documented as the permanent frozen inference backbone.
+  - BABAPPAi is documented as the software framework around that fixed model.
+- Updated runtime/model provenance fields and CLI text to remove transitional wording
+  implying future BABAPPAi-specific weight replacement.
+- Updated README, manuscript, citation metadata, and validation report wording to
+  state that calibration/applicability updates do not imply model-weight changes.
+
 ## 2.0.1 - 2026-03-29
 
 - Set `pyproject.toml` `[project].version` to `2.0.1` as the canonical package version source.

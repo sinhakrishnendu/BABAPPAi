@@ -15,6 +15,8 @@ from babappai.dispersion import PRIMARY_DISPERSION_METHOD, SUPPORTED_DISPERSION_
 from babappai.metadata import (
     MODEL_COMPATIBILITY_NOTE,
     MODEL_DOI,
+    MODEL_NAME,
+    MODEL_ROLE,
     MODEL_TAG,
     PACKAGE_NAME,
     SOFTWARE_NAME,
@@ -40,7 +42,9 @@ def _print_error(message: str) -> None:
 
 def _print_model_status(status: dict) -> None:
     print(f"Model tag: {status['model_tag']}")
-    print(f"Legacy model name: {status['legacy_model_name']}")
+    print(f"Model name: {status['model_name']}")
+    print(f"Model lineage: {status['model_lineage']}")
+    print(f"Model role: {status['model_role']}")
     print(f"Cached: {'YES' if status['cached'] else 'NO'}")
     print(f"Path: {status['cached_path']}")
     print(f"DOI: {status['doi']}")
@@ -253,6 +257,8 @@ def cmd_version(args: argparse.Namespace) -> int:
     print(f"software_name={SOFTWARE_NAME}")
     print(f"software_version={__version__}")
     print(f"model_tag={MODEL_TAG}")
+    print(f"model_name={MODEL_NAME}")
+    print(f"model_role={MODEL_ROLE}")
     print(f"model_doi={MODEL_DOI}")
     print(f"calibration_version={calibration_version}")
     print("model_cached=" + ("yes" if status["cached"] else "no"))
@@ -361,8 +367,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="babappai",
         description=(
-            "BABAPPAi: diagnostic framework for identifiability of episodic "
-            "branch-site structure (renamed continuation of BABAPPAΩ)."
+            "BABAPPAi: software framework for identifiability diagnostics built "
+            "around the canonical frozen BABAPPAΩ model."
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -420,9 +426,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--overwrite", action="store_true")
     run_parser.set_defaults(func=cmd_run)
 
-    model_parser = subparsers.add_parser("model", help="Manage frozen model cache")
+    model_parser = subparsers.add_parser("model", help="Manage canonical frozen model cache")
     model_sub = model_parser.add_subparsers(dest="model_command")
-    model_fetch = model_sub.add_parser("fetch", help="Download and verify frozen model")
+    model_fetch = model_sub.add_parser("fetch", help="Download and verify canonical frozen model")
     model_fetch.add_argument("--force", action="store_true")
     model_fetch.add_argument("--offline", action="store_true")
     model_fetch.set_defaults(func=cmd_model_fetch)

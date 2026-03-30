@@ -14,10 +14,13 @@ from urllib.request import urlopen
 from platformdirs import user_cache_dir
 
 from babappai.metadata import (
-    LEGACY_MODEL_NAME,
+    LEGACY_MODEL_TAG,
     MODEL_COMPATIBILITY_NOTE,
     MODEL_DOI,
     MODEL_FILE_NAME,
+    MODEL_LINEAGE_NAME,
+    MODEL_NAME,
+    MODEL_ROLE,
     MODEL_SHA256,
     MODEL_TAG,
     MODEL_URL,
@@ -77,7 +80,9 @@ def model_status() -> Dict[str, object]:
 
     return {
         "model_tag": MODEL_TAG,
-        "legacy_model_name": LEGACY_MODEL_NAME,
+        "model_name": MODEL_NAME,
+        "model_lineage": MODEL_LINEAGE_NAME,
+        "model_role": MODEL_ROLE,
         "file_name": MODEL_FILE_NAME,
         "doi": MODEL_DOI,
         "url": MODEL_URL,
@@ -154,7 +159,8 @@ def fetch_model(*, force: bool = False, offline: bool = False) -> Dict[str, obje
 
 
 def ensure_model(model_tag: str = MODEL_TAG, *, offline: bool = False) -> Path:
-    if model_tag != MODEL_TAG:
+    accepted_tags = {MODEL_TAG, "canonical_frozen_model", "frozen", LEGACY_MODEL_TAG}
+    if model_tag not in accepted_tags:
         raise ValueError(f"Unknown model tag: {model_tag}")
 
     status = fetch_model(offline=offline)
@@ -162,4 +168,3 @@ def ensure_model(model_tag: str = MODEL_TAG, *, offline: bool = False) -> Path:
         raise ModelError("Model checksum verification failed.")
 
     return Path(status["cached_path"])
-

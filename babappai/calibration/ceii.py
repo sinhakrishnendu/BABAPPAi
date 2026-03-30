@@ -18,6 +18,9 @@ D_OBS_DEFINITION = (
 
 def default_calibration_asset_path() -> Path:
     data_dir = Path(__file__).resolve().parent.parent / "data"
+    v3 = data_dir / "ceii_calibration_v3.json"
+    if v3.exists():
+        return v3
     v2 = data_dir / "ceii_calibration_v2.json"
     if v2.exists():
         return v2
@@ -119,11 +122,39 @@ def _build_feature_context(
     n_taxa: int,
     gene_length_nt: int,
     n_branches: Optional[int],
+    q_emp: Optional[float],
+    dispersion_ratio: Optional[float],
+    sigma0_final: Optional[float],
     extra_covariates: Optional[Mapping[str, float]],
 ) -> Dict[str, float]:
+    eii_z = float(eii_z_raw)
+    eii_01 = float(1.0 / (1.0 + math.exp(-eii_z)))
+    eii_z_clip = float(np.clip(eii_z, -12.0, 12.0))
+    qv = _safe_float(q_emp)
+    if qv is None:
+        qv = 1.0
+    qv = float(np.clip(qv, 0.0, 1.0))
+    neglog10_q = float(-math.log10(max(qv, 1e-12)))
+    dr = _safe_float(dispersion_ratio)
+    if dr is None:
+        dr = 0.0
+    dr = max(float(dr), 0.0)
+    dr_clip = float(np.clip(dr, 0.0, 10.0))
+    s0 = _safe_float(sigma0_final)
+    if s0 is None:
+        s0 = 0.0
+    s0 = max(float(s0), 0.0)
+
     ctx: Dict[str, float] = {
-        "eii_z_raw": float(eii_z_raw),
-        "eii_01_raw": float(1.0 / (1.0 + math.exp(-float(eii_z_raw)))),
+        "eii_z_raw": eii_z,
+        "eii_01_raw": eii_01,
+        "eii_z_clipped": eii_z_clip,
+        "q_emp": qv,
+        "neglog10_q_emp": neglog10_q,
+        "dispersion_ratio": dr,
+        "dispersion_ratio_clipped": dr_clip,
+        "sigma0_final": s0,
+        "sigma0_inverse": float(1.0 / max(s0, 1e-8)),
         "n_taxa": float(n_taxa),
         "gene_length_nt": float(gene_length_nt),
         "log1p_n_taxa": float(math.log1p(max(float(n_taxa), 0.0))),
@@ -186,7 +217,7 @@ def _predict_target_probability(
 ) -> Tuple[float, float, float]:
     model_key = f"{target}_model"
     model = asset.get(model_key)
-    legacy_cal_key = f"{target}_calibrator"
+    v1_cal_key = f"{target}_calibrator"
 
     # ceii_v2 style: linear-score model followed by isotonic calibration.
     if isinstance(model, Mapping) and str(model.get("type", "")) == "linear_score_isotonic":
@@ -225,10 +256,10 @@ def _predict_target_probability(
             hi = p
         return p, lo, hi
 
-    # backward-compatible path: isotonic directly on eii_z_raw.
-    calibrator = asset.get(legacy_cal_key)
+    # Compatibility path for earlier assets: isotonic directly on eii_z_raw.
+    calibrator = asset.get(v1_cal_key)
     if not isinstance(calibrator, Mapping):
-        raise ValueError(f"Missing {legacy_cal_key} in calibration asset.")
+        raise ValueError(f"Missing {v1_cal_key} in calibration asset.")
     p = float(predict_isotonic(calibrator, [eii_z_raw])[0])
     ci_root = asset.get("prediction_ci", {})
     if isinstance(ci_root, Mapping) and f"{target}_lower" in ci_root and f"{target}_upper" in ci_root:
@@ -380,7 +411,7 @@ def class_from_probability(
 
 
 def _coerce_feature_envelope(applicability: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
-    """Return required feature envelope with legacy-asset compatibility."""
+    """Return required feature envelope with compatibility for earlier assets."""
     if isinstance(applicability.get("features"), Mapping):
         out: Dict[str, Dict[str, float]] = {}
         for key, spec in applicability["features"].items():
@@ -392,7 +423,7 @@ def _coerce_feature_envelope(applicability: Mapping[str, Any]) -> Dict[str, Dict
         if out:
             return out
 
-    # Legacy ceii_v1 compatibility.
+    # Compatibility path for ceii_v1 assets.
     return {
         "n_taxa": {
             "min": float(applicability.get("min_n_taxa", 0)),
@@ -562,6 +593,9 @@ def apply_ceii_calibration(
     n_taxa: int,
     gene_length_nt: int,
     n_branches: Optional[int] = None,
+    q_emp: Optional[float] = None,
+    dispersion_ratio: Optional[float] = None,
+    sigma0_final: Optional[float] = None,
     extra_covariates: Optional[Mapping[str, float]] = None,
     asset: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -573,6 +607,18 @@ def apply_ceii_calibration(
                 covars[str(k)] = float(fv)
     if n_branches is not None and np.isfinite(float(n_branches)):
         covars["n_branches"] = float(n_branches)
+    qv = _safe_float(q_emp)
+    if qv is not None:
+        covars["q_emp"] = float(qv)
+        covars["neglog10_q_emp"] = float(-math.log10(max(min(qv, 1.0), 1e-12)))
+    drv = _safe_float(dispersion_ratio)
+    if drv is not None:
+        covars["dispersion_ratio"] = float(max(drv, 0.0))
+        covars["dispersion_ratio_clipped"] = float(np.clip(max(drv, 0.0), 0.0, 10.0))
+    s0 = _safe_float(sigma0_final)
+    if s0 is not None:
+        covars["sigma0_final"] = float(max(s0, 0.0))
+        covars["sigma0_inverse"] = float(1.0 / max(float(s0), 1e-8))
 
     applicability_meta = evaluate_applicability(
         n_taxa=int(n_taxa),
@@ -607,6 +653,9 @@ def apply_ceii_calibration(
         n_taxa=int(n_taxa),
         gene_length_nt=int(gene_length_nt),
         n_branches=n_branches,
+        q_emp=q_emp,
+        dispersion_ratio=dispersion_ratio,
+        sigma0_final=sigma0_final,
         extra_covariates=covars,
     )
     p_gene, gene_low, gene_high = _predict_target_probability(

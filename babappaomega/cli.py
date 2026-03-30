@@ -1,4 +1,4 @@
-"""Legacy CLI entry point shim."""
+"""Compatibility CLI entry point shim."""
 
 import sys
 
@@ -7,8 +7,8 @@ from babappai.cli import main as _main
 
 def main(argv=None):
     print(
-        "[DEPRECATION] 'babappaomega' CLI is legacy. Use 'babappai'. "
-        "BABAPPAi is the renamed continuation of BABAPPAΩ.",
+        "[DEPRECATION] 'babappaomega' CLI is a compatibility alias. Use 'babappai'. "
+        "BABAPPAΩ remains the canonical frozen inference model used by BABAPPAi.",
         file=sys.stderr,
     )
     return _main(argv)

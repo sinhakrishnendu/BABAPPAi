@@ -29,6 +29,14 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from babappai.calibration.ceii import load_calibration_asset
+from babappai.encoding import PAD_ID
+from babappai.input_qc import (
+    InputPreflightError,
+    audit_codon_fasta,
+    cap_records_for_model_support,
+    deduplicate_species_records,
+    validate_alignment_tree_preflight,
+)
 
 STOP_CODONS = {"TAA", "TAG", "TGA"}
 EXPECTED_CONTROL_CLASS: Dict[str, str] = {
@@ -127,12 +135,14 @@ def sanitize_cds(
     output_fasta: Path,
     *,
     log_path: Path,
+    accession_prefix_len: int = 6,
+    max_model_sequences: int = int(PAD_ID) + 1,
 ) -> Dict[str, Any]:
     records = list(SeqIO.parse(str(input_fasta), "fasta"))
     if not records:
         raise ValueError(f"No records found in {input_fasta}")
 
-    sanitized: List[SeqRecord] = []
+    sanitized_candidates: List[SeqRecord] = []
     seen_ids: Dict[str, int] = {}
 
     dropped_internal_stop = 0
@@ -148,12 +158,6 @@ def sanitize_cds(
     for rec in records:
         rec_id = rec.id.strip() or "unnamed"
         orig_id = rec_id
-        count = seen_ids.get(rec_id, 0)
-        if count > 0:
-            rec_id = f"{rec_id}_dup{count+1}"
-            renamed_ids += 1
-            append_log(log_path, f"sanitize:{input_fasta.name}:{orig_id} renamed to {rec_id} (duplicate ID)")
-        seen_ids[orig_id] = count + 1
 
         seq = str(rec.seq).upper().replace("U", "T")
         gap_count = seq.count("-")
@@ -204,7 +208,54 @@ def sanitize_cds(
             append_log(log_path, f"sanitize:{input_fasta.name}:{orig_id} dropped (internal stop codon)")
             continue
 
-        sanitized.append(SeqRecord(Seq(seq), id=rec_id, description=""))
+        sanitized_candidates.append(SeqRecord(Seq(seq), id=rec_id, description=rec.description))
+
+    if not sanitized_candidates:
+        raise ValueError(f"All records were dropped during sanitization for {input_fasta}")
+
+    deduped_records, orthology_audit_rows = deduplicate_species_records(
+        sanitized_candidates,
+        gene_name=input_fasta.stem,
+        accession_prefix_len=accession_prefix_len,
+    )
+    cap_discarded = 0
+    if len(deduped_records) > int(max_model_sequences):
+        deduped_records, cap_rows = cap_records_for_model_support(
+            deduped_records,
+            gene_name=input_fasta.stem,
+            max_sequences=int(max_model_sequences),
+        )
+        cap_discarded = len(cap_rows)
+        orthology_audit_rows.extend(cap_rows)
+        append_log(
+            log_path,
+            (
+                f"orthology:{input_fasta.name}:applied_model_support_taxon_cap "
+                f"max_sequences={int(max_model_sequences)} dropped={cap_discarded}"
+            ),
+        )
+    species_dedup_discarded = len(orthology_audit_rows)
+    for row in orthology_audit_rows:
+        append_log(
+            log_path,
+            (
+                f"orthology:{input_fasta.name}:discarded={row['discarded_record_id']} "
+                f"kept={row['kept_record_id']} species_key={row['species_key']} "
+                f"method={row['species_key_method']}"
+            ),
+        )
+
+    sanitized: List[SeqRecord] = []
+    seen_ids.clear()
+    for rec in deduped_records:
+        rec_id = rec.id.strip() or "unnamed"
+        count = seen_ids.get(rec_id, 0)
+        if count > 0:
+            rec_id = f"{rec_id}_dup{count+1}"
+            renamed_ids += 1
+            append_log(log_path, f"sanitize:{input_fasta.name}:{rec.id} renamed to {rec_id} (duplicate ID)")
+        seen_ids[rec.id] = count + 1
+        sanitized.append(SeqRecord(Seq(str(rec.seq).upper()), id=rec_id, description=""))
 
     if not sanitized:
         raise ValueError(f"All records were dropped during sanitization for {input_fasta}")
@@ -228,7 +279,12 @@ def sanitize_cds(
         "renamed_duplicate_ids": renamed_ids,
         "removed_gap_chars_total": removed_gap_chars,
         "replaced_non_atgcn_total": replaced_non_atgcn,
+        "species_groups_after_dedup": len(sanitized),
+        "species_dedup_discarded": species_dedup_discarded,
+        "species_model_cap_discarded": cap_discarded,
+        "model_max_sequences": int(max_model_sequences),
         "alignment_needed": len(set(lengths)) > 1,
+        "orthology_audit_rows": orthology_audit_rows,
     }
     append_log(log_path, f"sanitize:{input_fasta.name}:stats={json.dumps(stats, sort_keys=True)}")
     return stats
@@ -247,6 +303,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--neutral-reps", type=int, default=200)
     p.add_argument("--device", default="cpu", choices=["cpu", "auto", "cuda"])
     p.add_argument("--ceii-asset", default=None, help="Optional cEII calibration asset JSON passed to babappai run.")
+    p.add_argument(
+        "--genes",
+        default="",
+        help="Optional comma-separated gene list to run (for example: ago2,r2d2).",
+    )
+    p.add_argument(
+        "--accession-prefix-len",
+        type=int,
+        default=6,
+        help="Digits used for accession-prefix species proxy when FASTA headers lack explicit species labels.",
+    )
     p.add_argument("--overwrite", action="store_true")
     return p.parse_args()
 
@@ -275,7 +342,7 @@ def resolve_applicability_envelope(ceii_asset: Optional[str]) -> Dict[str, Tuple
                 out[key] = (None, None)
         return out
 
-    # Legacy ceii_v1 shape.
+    # Compatibility with ceii_v1-shaped payloads.
     def _coerce(name_min: str, name_max: str) -> Tuple[Optional[float], Optional[float]]:
         try:
             lo = float(app.get(name_min))
@@ -677,9 +744,19 @@ def main() -> int:
     fasta_paths = sorted(ortholog_dir.glob("*.fasta"))
     if not fasta_paths:
         raise FileNotFoundError(f"No FASTA files found in {ortholog_dir}")
+    requested_genes = {
+        g.strip() for g in str(args.genes).split(",") if g and g.strip()
+    }
+    if requested_genes:
+        fasta_paths = [p for p in fasta_paths if p.stem in requested_genes]
+        if not fasta_paths:
+            raise ValueError(f"No matching genes found for --genes={sorted(requested_genes)}")
+        append_log(run_log, f"gene_filter={sorted(requested_genes)}")
 
     manifest_rows: List[Dict[str, Any]] = []
     summary_rows: List[Dict[str, Any]] = []
+    codon_audit_rows: List[Dict[str, Any]] = []
+    orthology_audit_rows: List[Dict[str, Any]] = []
 
     for fasta_path in fasta_paths:
         gene = fasta_path.stem
@@ -693,7 +770,38 @@ def main() -> int:
         sanitized_path = gene_work / f"{gene}.sanitized.fasta"
 
         try:
-            sanitize_stats = sanitize_cds(fasta_path, sanitized_path, log_path=run_log)
+            raw_codon_audit = audit_codon_fasta(
+                fasta_path,
+                gene_name=gene,
+                stage="raw_input",
+                allow_gap_triplet=False,
+            )
+            raw_codon_audit["alignment_path"] = str(fasta_path)
+            codon_audit_rows.append(raw_codon_audit)
+
+            sanitize_stats = sanitize_cds(
+                fasta_path,
+                sanitized_path,
+                log_path=run_log,
+                accession_prefix_len=args.accession_prefix_len,
+                max_model_sequences=int(PAD_ID) + 1,
+            )
+            orthology_rows_gene = list(sanitize_stats.pop("orthology_audit_rows", []))
+            orthology_audit_rows.extend(orthology_rows_gene)
+
+            sanitized_codon_audit = audit_codon_fasta(
+                sanitized_path,
+                gene_name=gene,
+                stage="sanitized_cds",
+                allow_gap_triplet=False,
+            )
+            sanitized_codon_audit["alignment_path"] = str(sanitized_path)
+            codon_audit_rows.append(sanitized_codon_audit)
+            if not bool(sanitized_codon_audit.get("valid_bool", False)):
+                raise InputPreflightError(
+                    "Sanitized CDS still contains invalid codon triplets. "
+                    f"examples={sanitized_codon_audit.get('invalid_examples')}"
+                )
 
             codon_alignment_path = gene_work / f"{gene}.sanitized.codon.aln.fasta"
             alignment_needed = bool(sanitize_stats["alignment_needed"])
@@ -727,6 +835,21 @@ def main() -> int:
                 shutil.copy2(sanitized_path, codon_alignment_path)
                 alignment_method = "alignment not needed (uniform sanitized CDS lengths)"
 
+            aligned_codon_audit = audit_codon_fasta(
+                codon_alignment_path,
+                gene_name=gene,
+                stage="codon_alignment",
+                allow_gap_triplet=True,
+            )
+            aligned_codon_audit["alignment_path"] = str(codon_alignment_path)
+            codon_audit_rows.append(aligned_codon_audit)
+            if not bool(aligned_codon_audit.get("valid_bool", False)):
+                raise InputPreflightError(
+                    "Codon alignment contains out-of-vocabulary or invalid triplets. "
+                    f"invalid_total={aligned_codon_audit.get('invalid_total')}; "
+                    f"examples={aligned_codon_audit.get('invalid_examples')}"
+                )
+
             if existing_tree:
                 tree_path = gene_work / existing_tree.name
                 shutil.copy2(existing_tree, tree_path)
@@ -755,6 +878,41 @@ def main() -> int:
                     raise FileNotFoundError(f"IQ-TREE treefile missing: {tree_path}")
                 tree_generation_method = "iqtree3 -st DNA -m GTR+F+R4 -nt 1 -seed 42 -redo"
                 tree_present_input = False
+
+            preflight_stats = validate_alignment_tree_preflight(
+                alignment_path=codon_alignment_path,
+                tree_path=tree_path,
+                gene_name=gene,
+                max_model_index=int(PAD_ID),
+                allow_gap_triplet=True,
+            )
+            codon_audit_rows.append(
+                {
+                    "gene_name": gene,
+                    "stage": "model_input_preflight",
+                    "n_sequences": preflight_stats.get("n_sequences", ""),
+                    "codon_triplets_total": preflight_stats.get("codon_triplets_total", ""),
+                    "sense_codon_count": preflight_stats.get("sense_codon_count", ""),
+                    "gap_triplet_count": preflight_stats.get("gap_triplet_count", ""),
+                    "stop_codon_count": preflight_stats.get("stop_codon_count", ""),
+                    "ambiguous_codon_count": preflight_stats.get("ambiguous_codon_count", ""),
+                    "partial_codon_count": preflight_stats.get("partial_codon_count", ""),
+                    "mixed_gap_codon_count": preflight_stats.get("mixed_gap_codon_count", ""),
+                    "oov_codon_count": preflight_stats.get("oov_codon_count", ""),
+                    "invalid_total": preflight_stats.get("invalid_total", ""),
+                    "invalid_sequence_count": preflight_stats.get("invalid_sequence_count", ""),
+                    "invalid_examples": preflight_stats.get("invalid_examples", ""),
+                    "allow_gap_triplet": True,
+                    "valid_bool": bool(preflight_stats.get("preflight_ok", False)),
+                    "alignment_path": str(codon_alignment_path),
+                    "max_parent_index": preflight_stats.get("max_parent_index", ""),
+                    "max_child_index": preflight_stats.get("max_child_index", ""),
+                    "max_descendants_per_branch": preflight_stats.get("max_descendants_per_branch", ""),
+                    "max_descendants_branch": preflight_stats.get("max_descendants_branch", ""),
+                    "overflow_cell_count_gt_pad": preflight_stats.get("overflow_cell_count_gt_pad", ""),
+                    "first_overflow_example": preflight_stats.get("first_overflow_example", ""),
+                }
+            )
 
             run_out = gene_work / "babappai_run"
             run_cmd_args = [
@@ -833,6 +991,12 @@ def main() -> int:
                 "dropped_internal_stop": sanitize_stats["dropped_internal_stop"],
                 "dropped_too_short": sanitize_stats["dropped_too_short"],
                 "renamed_duplicate_ids": sanitize_stats["renamed_duplicate_ids"],
+                "species_dedup_discarded": sanitize_stats.get("species_dedup_discarded", 0),
+                "species_model_cap_discarded": sanitize_stats.get("species_model_cap_discarded", 0),
+                "max_parent_index_preflight": preflight_stats.get("max_parent_index"),
+                "max_child_index_preflight": preflight_stats.get("max_child_index"),
+                "max_descendants_per_branch_preflight": preflight_stats.get("max_descendants_per_branch"),
+                "max_descendants_branch_preflight": preflight_stats.get("max_descendants_branch"),
                 "status": "ok",
                 "error": "",
             }
@@ -871,6 +1035,12 @@ def main() -> int:
                     "model_version": gene_summary.get("model_version"),
                     "model_checkpoint_provenance": gene_summary.get("model_checkpoint_provenance"),
                     "domain_shift_or_applicability": gene_summary.get("domain_shift_or_applicability"),
+                    "species_dedup_discarded": sanitize_stats.get("species_dedup_discarded", 0),
+                    "species_model_cap_discarded": sanitize_stats.get("species_model_cap_discarded", 0),
+                    "max_parent_index_preflight": preflight_stats.get("max_parent_index"),
+                    "max_child_index_preflight": preflight_stats.get("max_child_index"),
+                    "max_descendants_per_branch_preflight": preflight_stats.get("max_descendants_per_branch"),
+                    "max_descendants_branch_preflight": preflight_stats.get("max_descendants_branch"),
                 }
             )
 
@@ -961,6 +1131,12 @@ def main() -> int:
         "dropped_internal_stop",
         "dropped_too_short",
         "renamed_duplicate_ids",
+        "species_dedup_discarded",
+        "species_model_cap_discarded",
+        "max_parent_index_preflight",
+        "max_child_index_preflight",
+        "max_descendants_per_branch_preflight",
+        "max_descendants_branch_preflight",
         "status",
         "error",
     ]
@@ -996,11 +1172,55 @@ def main() -> int:
         "model_version",
         "model_checkpoint_provenance",
         "domain_shift_or_applicability",
+        "species_dedup_discarded",
+        "species_model_cap_discarded",
+        "max_parent_index_preflight",
+        "max_child_index_preflight",
+        "max_descendants_per_branch_preflight",
+        "max_descendants_branch_preflight",
     ]
 
     write_table(outdir / "ortholog_manifest.tsv", manifest_rows, manifest_fields, "\t")
     write_table(outdir / "babappai_per_gene_summary.tsv", summary_rows, summary_fields, "\t")
     write_table(outdir / "babappai_per_gene_summary.csv", summary_rows, summary_fields, ",")
+    codon_audit_fields = [
+        "gene_name",
+        "stage",
+        "alignment_path",
+        "n_sequences",
+        "codon_triplets_total",
+        "sense_codon_count",
+        "gap_triplet_count",
+        "stop_codon_count",
+        "ambiguous_codon_count",
+        "partial_codon_count",
+        "mixed_gap_codon_count",
+        "oov_codon_count",
+        "invalid_total",
+        "invalid_sequence_count",
+        "invalid_examples",
+        "allow_gap_triplet",
+        "valid_bool",
+        "max_parent_index",
+        "max_child_index",
+        "max_descendants_per_branch",
+        "max_descendants_branch",
+        "overflow_cell_count_gt_pad",
+        "first_overflow_example",
+    ]
+    orthology_audit_fields = [
+        "gene_name",
+        "species_key",
+        "species_key_method",
+        "kept_record_id",
+        "discarded_record_id",
+        "discard_reason",
+        "selection_rule",
+        "kept_length_nt",
+        "discarded_length_nt",
+    ]
+    write_table(outdir / "codon_audit.tsv", codon_audit_rows, codon_audit_fields, "\t")
+    write_table(outdir / "orthology_audit.tsv", orthology_audit_rows, orthology_audit_fields, "\t")
 
     fig_paths = make_figures(summary_rows, outdir, log_path=run_log)
     write_report(outdir=outdir, summary_rows=summary_rows, manifest_rows=manifest_rows, fig_paths=fig_paths)

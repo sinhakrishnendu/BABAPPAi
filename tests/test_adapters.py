@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from babappai.calibration.neutral_generator_adapter import run_neutral_generator
+from babappai.metadata import MODEL_TAG
 from babappai.validation.simulator_adapter import run_simulator
 
 
@@ -17,7 +18,7 @@ def test_neutral_generator_adapter(tmp_path):
     meta = run_neutral_generator(
         generator_path=str(script),
         output_dir=str(tmp_path / "out"),
-        model_tag="legacy_frozen",
+        model_tag=MODEL_TAG,
         seed=1,
     )
 

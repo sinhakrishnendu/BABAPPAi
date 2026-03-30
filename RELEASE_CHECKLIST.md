@@ -2,10 +2,10 @@
 
 ## Pre-Release
 
-1. Confirm target version in `babappai/metadata.py` and `CHANGELOG.md`.
-2. Confirm `CITATION.cff` version matches release version.
+1. Confirm target version in `pyproject.toml` and `CHANGELOG.md`.
+2. Confirm `CITATION.cff` version matches release version and cites BABAPPAΩ model DOI.
 3. Confirm calibration asset version/provenance:
-   - `babappai/data/ceii_calibration_v1.json` exists
+   - `babappai/data/ceii_calibration_v2.json` exists
    - `calibration_version` and threshold bands are intentional for this release
    - `D_obs` definition in asset matches locked method
 4. Run local checks:

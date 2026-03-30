@@ -1968,7 +1968,7 @@ def generate_manuscript_outputs(
             "The observed dispersion statistic D_obs was extracted from model outputs; neutral calibration parameters (mu0, sigma0) were derived from matched neutral replicate distributions, with sigma0 floored at a user-configurable minimum before EII_z was computed.",
             "Empirical p-values were computed as p_emp=(1+count(D0>=D_obs))/(M+1), where D0 are matched neutral replicate dispersion values.",
             "Multiple testing control used Benjamini-Hochberg q_emp across genes in the analysis set, with significance defined as q_emp<=alpha.",
-            "Threshold-based EII_01 summaries were retained only as descriptive/legacy comparisons.",
+            "Threshold-based EII_01 summaries were retained only as descriptive compatibility comparisons.",
             "Bootstrap uncertainty intervals were computed by gene-level resampling with replacement.",
             "EII was interpreted as an identifiability/recoverability diagnostic, not direct evidence of adaptive substitution.",
         ]
@@ -2011,7 +2011,7 @@ def generate_manuscript_outputs(
         f"- neutral p_emp KS deviation from Uniform(0,1): `{neutral_ks:.3f}`",
         f"- significance calibration status: `{support_flag}`",
         "",
-        "## Legacy threshold comparison (descriptive only)",
+        "## Compatibility threshold comparison (descriptive only)",
         f"- {support_text}",
         f"- EII threshold balanced accuracy: `{threshold_bal:.3f}`",
         f"- Delta balanced accuracy (q_emp - EII threshold): `{delta_bal:.3f}`",

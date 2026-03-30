@@ -17,9 +17,18 @@ from babappai.calibration import (
     load_calibration_asset,
 )
 from babappai.dispersion import PRIMARY_DISPERSION_METHOD, compute_dispersion
-from babappai.encoding import encode_alignment
+from babappai.encoding import PAD_ID, encode_alignment
 from babappai.identifiability import eii01_from_eiiz
-from babappai.metadata import MODEL_DOI, MODEL_FILE_NAME, MODEL_SHA256, MODEL_TAG
+from babappai.input_qc import InputPreflightError
+from babappai.metadata import (
+    MODEL_DOI,
+    MODEL_FILE_NAME,
+    MODEL_LINEAGE_NAME,
+    MODEL_NAME,
+    MODEL_ROLE,
+    MODEL_SHA256,
+    MODEL_TAG,
+)
 from babappai.model_manager import ensure_model, model_status
 from babappai.stats import empirical_monte_carlo_pvalue
 from babappai.tree import enumerate_branches, load_tree
@@ -187,6 +196,7 @@ def run_inference(
 ) -> Dict[str, object]:
     """Run branch-conditioned inference and return structured outputs."""
 
+    canonical_model_tag = MODEL_TAG
     warnings: List[str] = [
         "Diagnostic identifiability score, not evidence of adaptive substitution.",
     ]
@@ -226,6 +236,12 @@ def run_inference(
     )
 
     taxon_names = [leaf.name for leaf in tree.get_leaves()]
+    if len(taxon_names) != ntaxa:
+        raise InputPreflightError(
+            "Tree/alignment taxon count mismatch before model inference: "
+            f"alignment_ntaxa={ntaxa}, tree_leaves={len(taxon_names)}. "
+            "Regenerate a matching tree/alignment pair."
+        )
     taxon_to_idx = {name: idx for idx, name in enumerate(taxon_names)}
 
     branch_to_taxa: List[List[int]] = []
@@ -242,6 +258,19 @@ def run_inference(
     parent = torch.zeros((1, K, L), dtype=torch.long, device=resolved_device)
     child = torch.zeros((1, K, L), dtype=torch.long, device=resolved_device)
 
+    max_model_index = int(PAD_ID)
+    max_parent_index = 0
+    max_child_index = 0
+    overflow_count = 0
+    first_overflow = ""
+    max_descendants = 0
+    max_desc_branch = ""
+
+    for b, taxa in enumerate(branch_to_taxa):
+        if len(taxa) > max_descendants:
+            max_descendants = len(taxa)
+            max_desc_branch = str(branches[b])
+
     for i in range(L):
         col = X[:, i].tolist()
         consensus = Counter(col).most_common(1)[0][0]
@@ -252,6 +281,30 @@ def run_inference(
             mismatches = sum(X[t, i] != consensus for t in taxa)
             parent[0, b, i] = len(taxa) - mismatches
             child[0, b, i] = mismatches
+            parent_value = int(parent[0, b, i].item())
+            child_value = int(child[0, b, i].item())
+            if parent_value > max_parent_index:
+                max_parent_index = parent_value
+            if child_value > max_child_index:
+                max_child_index = child_value
+            if parent_value > max_model_index or child_value > max_model_index:
+                overflow_count += 1
+                if not first_overflow:
+                    first_overflow = (
+                        f"branch={branches[b]}, site={i + 1}, descendants={len(taxa)}, "
+                        f"parent={parent_value}, child={child_value}"
+                    )
+
+    if overflow_count > 0:
+        raise InputPreflightError(
+            "Model-input preflight failed before TorchScript call: parent/child feature index exceeds "
+            f"the frozen model limit ({max_model_index}). "
+            f"max_parent_index={max_parent_index}, max_child_index={max_child_index}, "
+            f"max_descendants_per_branch={max_descendants} (branch={max_desc_branch}), "
+            f"n_sequences={ntaxa}, overflow_cells={overflow_count}, first_overflow={first_overflow}. "
+            "This is usually caused by oversized or impure orthogroups; reduce to one sequence per species "
+            "and ensure branch descendant counts stay within model support."
+        )
 
     branch_length = torch.ones((1, K), dtype=torch.float32, device=resolved_device)
 
@@ -428,6 +481,9 @@ def run_inference(
                 n_taxa=ntaxa,
                 gene_length_nt=L,
                 n_branches=K,
+                q_emp=q_emp,
+                dispersion_ratio=dispersion_ratio,
+                sigma0_final=neutral_sd_floored,
                 asset=calibration_asset,
             )
         except Exception as exc:
@@ -565,7 +621,10 @@ def run_inference(
         "identifiability_extent": band_extent,
         "identifiable_bool_deprecated": band_bool,
         "identifiability_extent_deprecated": band_extent,
-        "model_version": str(model_tag),
+        "model_version": canonical_model_tag,
+        "model_name": MODEL_NAME,
+        "model_lineage": MODEL_LINEAGE_NAME,
+        "model_role": MODEL_ROLE,
         "model_checkpoint_provenance": {
             "model_file_name": MODEL_FILE_NAME,
             "model_doi": MODEL_DOI,
@@ -598,9 +657,12 @@ def run_inference(
         )
 
     result = {
-        "model": "BABAPPAiLegacyFrozenModel",
-        "model_tag": model_tag,
-        "model_version": str(model_tag),
+        "model": "BABAPPAOmegaCanonicalFrozenModel",
+        "model_tag": canonical_model_tag,
+        "model_version": canonical_model_tag,
+        "model_name": MODEL_NAME,
+        "model_lineage": MODEL_LINEAGE_NAME,
+        "model_role": MODEL_ROLE,
         "model_checkpoint_provenance": {
             "model_file_name": MODEL_FILE_NAME,
             "model_doi": MODEL_DOI,

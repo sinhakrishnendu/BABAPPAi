@@ -17,7 +17,10 @@ from babappai.metadata import (
     MODEL_COMPATIBILITY_NOTE,
     MODEL_DOI,
     MODEL_FILE_NAME,
+    MODEL_NAME,
+    MODEL_ROLE,
     MODEL_SHA256,
+    MODEL_TAG,
     SOFTWARE_NAME,
 )
 
@@ -91,7 +94,7 @@ def run_and_write_outputs(
     result = run_inference(
         alignment_path=alignment_path,
         tree_path=tree_path,
-        model_tag="legacy_frozen",
+        model_tag=MODEL_TAG,
         tree_calibration=tree_calibration,
         N_calibration=n_calibration,
         device=device,
@@ -134,6 +137,10 @@ def run_and_write_outputs(
         "command": command,
         "timestamp": utc_timestamp(),
         "model": {
+            "model_tag": mstatus.get("model_tag", MODEL_TAG),
+            "model_name": mstatus.get("model_name", MODEL_NAME),
+            "model_lineage": mstatus.get("model_lineage", "BABAPPAΩ"),
+            "model_role": mstatus.get("model_role", MODEL_ROLE),
             "file_name": MODEL_FILE_NAME,
             "doi": MODEL_DOI,
             "sha256": MODEL_SHA256,

@@ -229,7 +229,7 @@ def select_orthogroups(
             "selected_counts": dict(sorted(stratum_counts.items())),
         },
         "provenance_note": (
-            "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase."
+            "BABAPPAi is the software framework around the canonical frozen BABAPPAΩ model."
         ),
     }
     (out / "selection_metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")

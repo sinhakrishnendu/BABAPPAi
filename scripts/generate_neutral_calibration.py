@@ -14,6 +14,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from babappai.inference import run_inference
+from babappai.metadata import MODEL_TAG
 
 
 CODONS = [
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--outdir", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-replicates", type=int, default=30)
-    parser.add_argument("--model-tag", default="legacy_frozen")
+    parser.add_argument("--model-tag", default=MODEL_TAG)
     parser.add_argument("--length-grid", default="200,400,800,1000")
     parser.add_argument("--taxa-grid", default="8,16,32,48,64")
     return parser.parse_args()

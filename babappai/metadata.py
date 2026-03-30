@@ -1,4 +1,4 @@
-"""Canonical metadata for BABAPPAi and legacy frozen assets.
+"""Canonical metadata for BABAPPAi and the frozen BABAPPAΩ model artifact.
 
 The package version source of truth is ``[project].version`` in ``pyproject.toml``.
 """
@@ -13,18 +13,25 @@ PACKAGE_NAME = "babappai"
 SOFTWARE_NAME = "BABAPPAi"
 SOFTWARE_DOI = "10.5281/zenodo.18520163"
 
-LEGACY_CODEBASE_NAME = "BABAPPAΩ"
-LEGACY_MODEL_NAME = "BABAPPAΩ frozen model"
-MODEL_TAG = "legacy_frozen"
+MODEL_LINEAGE_NAME = "BABAPPAΩ"
+MODEL_NAME = "BABAPPAΩ canonical frozen model"
+MODEL_TAG = "frozen_babappaomega_model"
+MODEL_ROLE = "canonical_inference_backbone"
 MODEL_FILE_NAME = "babappaomega.pt"
 MODEL_DOI = "10.5281/zenodo.18195869"
 MODEL_URL = "https://zenodo.org/records/18195869/files/babappaomega.pt?download=1"
 MODEL_SHA256 = "657a662563af31304abcb208fc903d2770a9184632a9bab2095db4c538fed8eb"
 MODEL_COMPATIBILITY_NOTE = (
-    "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase. "
-    "The cached frozen model is a legacy BABAPPAΩ asset used for "
-    "backward-compatible inference until BABAPPAi-specific weights are released."
+    "BABAPPAi is the operational software framework around the canonical frozen "
+    "BABAPPAΩ model artifact. Model weights are fixed; BABAPPAi updates affect "
+    "calibration, applicability, reporting, and packaging layers without "
+    "changing the underlying neural inference backbone."
 )
+
+# Backward-compatible aliases retained for older imports.
+LEGACY_CODEBASE_NAME = MODEL_LINEAGE_NAME
+LEGACY_MODEL_NAME = MODEL_NAME
+LEGACY_MODEL_TAG = "legacy_frozen"
 
 
 def _read_pyproject_version() -> str:

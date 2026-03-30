@@ -45,8 +45,10 @@ def test_model_status_command(monkeypatch, capsys):
         cli,
         "model_status",
         lambda: {
-            "model_tag": "legacy_frozen",
-            "legacy_model_name": "BABAPPAΩ frozen model",
+            "model_tag": "frozen_babappaomega_model",
+            "model_name": "BABAPPAΩ canonical frozen model",
+            "model_lineage": "BABAPPAΩ",
+            "model_role": "canonical_inference_backbone",
             "cached": False,
             "cached_path": "/tmp/missing.pt",
             "doi": "10.5281/zenodo.18195869",

@@ -1,7 +1,7 @@
-"""Legacy raw-EII descriptive helpers.
+"""Raw-EII descriptive helper utilities.
 
 Primary release-facing identifiability decisions should use calibrated cEII
-probabilities. This module remains for backward-compatible descriptive output.
+probabilities. This module remains for compatibility-oriented descriptive output.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ REGIME_WEAK_OR_AMBIGUOUS = "weak_or_ambiguous"
 REGIME_IDENTIFIABLE = "identifiable"
 REGIME_STRONGLY_IDENTIFIABLE = "strongly_identifiable"
 EII_BANDS_DESCRIPTIVE_ONLY = True
-LEGACY_FALLBACK_THRESHOLDS = (0.30, 0.70, 0.90)
+COMPATIBILITY_FALLBACK_THRESHOLDS = (0.30, 0.70, 0.90)
 
 
 def eii01_from_eiiz(eii_z: float) -> float:
@@ -30,17 +30,21 @@ def _resolve_thresholds(calibration_asset_path: Optional[str] = None) -> Tuple[T
 
         asset = load_calibration_asset(calibration_asset_path)
         gene_thr = asset.get("thresholds", {}).get("gene", {})
-        weak = float(gene_thr.get("weak_threshold", LEGACY_FALLBACK_THRESHOLDS[0]))
-        main = float(gene_thr.get("threshold", LEGACY_FALLBACK_THRESHOLDS[1]))
-        strong = float(gene_thr.get("strong_threshold", LEGACY_FALLBACK_THRESHOLDS[2]))
+        weak = float(gene_thr.get("weak_threshold", COMPATIBILITY_FALLBACK_THRESHOLDS[0]))
+        main = float(gene_thr.get("threshold", COMPATIBILITY_FALLBACK_THRESHOLDS[1]))
+        strong = float(gene_thr.get("strong_threshold", COMPATIBILITY_FALLBACK_THRESHOLDS[2]))
         if not (0.0 <= weak <= main <= strong <= 1.0):
             raise ValueError("invalid threshold ordering in calibration asset")
         return (weak, main, strong), "empirical_calibration_asset"
     except Exception:
-        return LEGACY_FALLBACK_THRESHOLDS, "legacy_fallback_fixed_thresholds"
+        return COMPATIBILITY_FALLBACK_THRESHOLDS, "compatibility_fallback_fixed_thresholds"
 
 
-def identifiability_extent(eii_01: float, *, thresholds: Tuple[float, float, float] = LEGACY_FALLBACK_THRESHOLDS) -> str:
+def identifiability_extent(
+    eii_01: float,
+    *,
+    thresholds: Tuple[float, float, float] = COMPATIBILITY_FALLBACK_THRESHOLDS,
+) -> str:
     weak, main, strong = thresholds
     if 0.0 <= eii_01 < weak:
         return REGIME_NOT_IDENTIFIABLE
@@ -51,8 +55,12 @@ def identifiability_extent(eii_01: float, *, thresholds: Tuple[float, float, flo
     return REGIME_STRONGLY_IDENTIFIABLE
 
 
-def identifiability_bool(eii_01: float, *, threshold: float = LEGACY_FALLBACK_THRESHOLDS[1]) -> bool:
-    """Legacy descriptive flag retained for backward compatibility."""
+def identifiability_bool(
+    eii_01: float,
+    *,
+    threshold: float = COMPATIBILITY_FALLBACK_THRESHOLDS[1],
+) -> bool:
+    """Compatibility descriptive flag retained for downstream continuity."""
     return eii_01 >= float(threshold)
 
 

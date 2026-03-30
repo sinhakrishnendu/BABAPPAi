@@ -1,0 +1,383 @@
+{
+  "calibration_version": "ceii_v3",
+  "d_obs_definition": "Two-sided 5% winsorized sample variance (ddof=1) of site-level mean branch logits (site_logit_mean) across codon sites for the observed alignment.",
+  "raw_eii_definition": "eii_z_raw = (D_obs - mu0) / max(sigma0_raw, sigma_floor), eii_01_raw = sigmoid(eii_z_raw)",
+  "calibration_semantics": "cEII is a conditional calibrated identifiability probability valid only when applicability criteria are satisfied; otherwise calibration abstains.",
+  "feature_set": {
+    "stage1_support_features": [
+      "n_taxa",
+      "gene_length_nt",
+      "n_branches"
+    ],
+    "stage2_evidence_features": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "stage2_design": "stage2_evidence_only_monotone"
+  },
+  "target_definitions": {
+    "R_gene": "0.55*branch_rank_norm + 0.30*burden_alignment + 0.15*(scenario_branch_stability * max(branch_rank_norm, burden_alignment)); NaN branch rank fallback=0.0",
+    "R_site": "0.50*site_enrichment_at_k + 0.35*site_rank_norm + 0.15*(scenario_site_stability * max(site_enrichment_at_k, site_rank_norm)); NaN site rank fallback=0.0",
+    "I_gene": "1 if R_gene >= 0.50 else 0",
+    "I_site": "1 if R_site >= 0.55 else 0"
+  },
+  "gene_model": {
+    "type": "linear_score_isotonic",
+    "score_design": "monotone_evidence_nonnegative",
+    "evidence_features_only": true,
+    "monotonic_directions": {
+      "eii_01_raw": "nondecreasing",
+      "eii_z_clipped": "nondecreasing",
+      "neglog10_q_emp": "nondecreasing",
+      "dispersion_ratio_clipped": "nondecreasing"
+    },
+    "feature_names": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "feature_mean": [
+      0.417847379640993,
+      0.33977593756299274,
+      0.22601088930619326,
+      0.9253702038449799
+    ],
+    "feature_scale": [
+      0.4377919128834441,
+      7.218026298813779,
+      0.3062350062111426,
+      0.5671026728115125
+    ],
+    "coef": [
+      2.2918179330439055e-19,
+      0.0,
+      3.463880049640972e-18,
+      7.445759258503481e-18
+    ],
+    "intercept": -9.239799427268549,
+    "isotonic_calibrator": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    },
+    "prediction_ci": {
+      "lower": {
+        "x": [
+          -9.239799427268549
+        ],
+        "y": [
+          0.0
+        ]
+      },
+      "upper": {
+        "x": [
+          -9.239799427268549
+        ],
+        "y": [
+          0.0
+        ]
+      }
+    }
+  },
+  "site_model": {
+    "type": "linear_score_isotonic",
+    "score_design": "monotone_evidence_nonnegative",
+    "evidence_features_only": true,
+    "monotonic_directions": {
+      "eii_01_raw": "nondecreasing",
+      "eii_z_clipped": "nondecreasing",
+      "neglog10_q_emp": "nondecreasing",
+      "dispersion_ratio_clipped": "nondecreasing"
+    },
+    "feature_names": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "feature_mean": [
+      0.417847379640993,
+      0.33977593756299274,
+      0.22601088930619326,
+      0.9253702038449799
+    ],
+    "feature_scale": [
+      0.4377919128834441,
+      7.218026298813779,
+      0.3062350062111426,
+      0.5671026728115125
+    ],
+    "coef": [
+      2.2918179330439055e-19,
+      0.0,
+      3.463880049640972e-18,
+      7.445759258503481e-18
+    ],
+    "intercept": -9.239799427268549,
+    "isotonic_calibrator": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    },
+    "prediction_ci": {
+      "lower": {
+        "x": [
+          -9.239799427268549
+        ],
+        "y": [
+          0.0
+        ]
+      },
+      "upper": {
+        "x": [
+          -9.239799427268549
+        ],
+        "y": [
+          0.0
+        ]
+      }
+    }
+  },
+  "gene_calibrator": {
+    "x": [
+      -9.239799427268549
+    ],
+    "y": [
+      0.0
+    ]
+  },
+  "site_calibrator": {
+    "x": [
+      -9.239799427268549
+    ],
+    "y": [
+      0.0
+    ]
+  },
+  "prediction_ci": {
+    "gene_lower": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    },
+    "gene_upper": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    },
+    "site_lower": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    },
+    "site_upper": {
+      "x": [
+        -9.239799427268549
+      ],
+      "y": [
+        0.0
+      ]
+    }
+  },
+  "thresholds": {
+    "gene": {
+      "threshold": 0.01,
+      "target_fdr": 0.1,
+      "weak_threshold": 0.0,
+      "strong_threshold": 0.11
+    },
+    "site": {
+      "threshold": 0.01,
+      "target_fdr": 0.1,
+      "weak_threshold": 0.0,
+      "strong_threshold": 0.11
+    }
+  },
+  "classes": {
+    "gene": [
+      {
+        "label": "not_identifiable",
+        "min": 0.0,
+        "max": 0.0
+      },
+      {
+        "label": "weak_or_ambiguous",
+        "min": 0.0,
+        "max": 0.01
+      },
+      {
+        "label": "identifiable",
+        "min": 0.01,
+        "max": 0.11
+      },
+      {
+        "label": "strongly_identifiable",
+        "min": 0.11,
+        "max": 1.0
+      }
+    ],
+    "site": [
+      {
+        "label": "not_identifiable",
+        "min": 0.0,
+        "max": 0.0
+      },
+      {
+        "label": "weak_or_ambiguous",
+        "min": 0.0,
+        "max": 0.01
+      },
+      {
+        "label": "identifiable",
+        "min": 0.01,
+        "max": 0.11
+      },
+      {
+        "label": "strongly_identifiable",
+        "min": 0.11,
+        "max": 1.0
+      }
+    ]
+  },
+  "applicability": {
+    "features": {
+      "n_taxa": {
+        "min": 8,
+        "max": 64
+      },
+      "gene_length_nt": {
+        "min": 120,
+        "max": 4500
+      },
+      "n_branches": {
+        "min": 29,
+        "max": 125
+      }
+    },
+    "near_boundary_fraction": 0.08,
+    "min_applicability_score_for_calibration": 0.95,
+    "allow_near_boundary_calibration": false,
+    "supported_regimes": [
+      {
+        "name": "large_deep|medium|none|mild|low",
+        "center": {
+          "n_taxa": 24.0,
+          "gene_length_nt": 1488.0,
+          "n_branches": 45.0
+        }
+      },
+      {
+        "name": "large_deep|very_short|none|none|high",
+        "center": {
+          "n_taxa": 24.0,
+          "gene_length_nt": 135.0,
+          "n_branches": 45.0
+        }
+      },
+      {
+        "name": "medium|medium|moderate|none|high",
+        "center": {
+          "n_taxa": 16.0,
+          "gene_length_nt": 1893.0,
+          "n_branches": 29.0
+        }
+      },
+      {
+        "name": "medium|short|moderate|high|low",
+        "center": {
+          "n_taxa": 16.0,
+          "gene_length_nt": 1023.0,
+          "n_branches": 29.0
+        }
+      },
+      {
+        "name": "medium|very_short|high|none|moderate",
+        "center": {
+          "n_taxa": 16.0,
+          "gene_length_nt": 526.5,
+          "n_branches": 29.0
+        }
+      },
+      {
+        "name": "medium|very_short|none|none|moderate",
+        "center": {
+          "n_taxa": 16.0,
+          "gene_length_nt": 225.0,
+          "n_branches": 29.0
+        }
+      },
+      {
+        "name": "ultra_large|long|none|mild|moderate",
+        "center": {
+          "n_taxa": 64.0,
+          "gene_length_nt": 3249.0,
+          "n_branches": 125.0
+        }
+      },
+      {
+        "name": "ultra_large|short|moderate|none|low",
+        "center": {
+          "n_taxa": 64.0,
+          "gene_length_nt": 723.0,
+          "n_branches": 125.0
+        }
+      },
+      {
+        "name": "ultra_large|very_short|none|none|low",
+        "center": {
+          "n_taxa": 64.0,
+          "gene_length_nt": 366.0,
+          "n_branches": 125.0
+        }
+      },
+      {
+        "name": "very_large|short|none|none|high",
+        "center": {
+          "n_taxa": 40.0,
+          "gene_length_nt": 1110.0,
+          "n_branches": 77.0
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "metrics_tsv_name": "full_pipeline_gene_metrics.tsv",
+    "bootstrap_reps": 200,
+    "seed": 123,
+    "label_profile": "v3",
+    "tau_gene": 0.5,
+    "tau_site": 0.55,
+    "split_counts": {
+      "train": 36,
+      "calibration": 12,
+      "test": 10,
+      "ood": 22
+    },
+    "split_counts_sigma_valid": {
+      "train": 36,
+      "calibration": 12,
+      "test": 10,
+      "ood": 22
+    },
+    "n_rows_total": 80,
+    "n_rows_sigma_valid": 80
+  }
+}

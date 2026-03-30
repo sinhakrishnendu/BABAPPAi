@@ -407,7 +407,10 @@ def run_empirical_validation(
         "robustness_limit": robustness_limit,
         "alpha_used": float(alpha),
         "pvalue_mode": pvalue_mode,
-        "note": "BABAPPAi is the renamed continuation of the BABAPPAΩ codebase.",
+        "note": (
+            "BABAPPAi is the software framework around the canonical frozen "
+            "BABAPPAΩ model backbone."
+        ),
     }
     (out / "empirical_metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     return metadata

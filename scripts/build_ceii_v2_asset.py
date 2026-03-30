@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build ceii_v2 from sigma-valid expanded benchmark runs."""
+"""Build cEII calibration assets from sigma-valid expanded benchmark runs."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="results/validation/ceii_benchmark_v2_expanded/dataset/synthetic_dataset.tsv",
     )
     p.add_argument("--outdir", default="results/validation/ceii_v2")
+    p.add_argument("--calibration-version", default="ceii_v2")
     p.add_argument("--dispersion-method", default=PRIMARY_DISPERSION_METHOD)
     p.add_argument("--device", default="cpu")
     p.add_argument("--batch-size", type=int, default=1)
@@ -85,7 +86,7 @@ def main() -> int:
         "--outdir",
         str(calibration_dir),
         "--calibration-version",
-        "ceii_v2",
+        str(args.calibration_version),
         "--bootstrap-reps",
         "200",
         "--seed",
@@ -103,16 +104,17 @@ def main() -> int:
         fit_cmd.append("--write-package-asset")
     subprocess.run(fit_cmd, check=True)
 
-    # Required publication deliverables with canonical ceii_v2 names.
+    version_slug = str(args.calibration_version)
+    # Required publication deliverables with versioned names.
     asset_src = calibration_dir / "ceii_calibration_asset.json"
     split_src = calibration_dir / "ceii_split_performance.tsv"
     rel_src = calibration_dir / "ceii_reliability.tsv"
     app_src = calibration_dir / "ceii_applicability_summary.json"
 
-    asset_dst = outdir / "ceii_v2_asset.json"
-    split_dst = outdir / "ceii_v2_split_performance.tsv"
-    rel_dst = outdir / "ceii_v2_reliability.tsv"
-    app_dst = outdir / "ceii_v2_applicability_summary.json"
+    asset_dst = outdir / f"{version_slug}_asset.json"
+    split_dst = outdir / f"{version_slug}_split_performance.tsv"
+    rel_dst = outdir / f"{version_slug}_reliability.tsv"
+    app_dst = outdir / f"{version_slug}_applicability_summary.json"
     for src, dst in (
         (asset_src, asset_dst),
         (split_src, split_dst),
@@ -126,7 +128,7 @@ def main() -> int:
     applicability_payload = json.loads(app_dst.read_text()) if app_dst.exists() else {}
 
     summary = {
-        "calibration_version": "ceii_v2",
+        "calibration_version": version_slug,
         "dataset_tsv": str(dataset_tsv),
         "dispersion_method": str(args.dispersion_method),
         "sigma_floor": float(args.sigma_floor),
@@ -145,7 +147,7 @@ def main() -> int:
             "applicability_summary_json": str(app_dst),
         },
     }
-    summary_path = outdir / "ceii_v2_summary.json"
+    summary_path = outdir / f"{version_slug}_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
     return 0

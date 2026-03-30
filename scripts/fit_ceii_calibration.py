@@ -96,6 +96,46 @@ def _feature_value(row: Mapping[str, Any], feature_name: str) -> float:
         if np.isfinite(n_taxa):
             return max(1.0, 2.0 * n_taxa - 3.0)
         return float("nan")
+    if feature_name == "eii_z_clipped":
+        v = _safe_float(row.get("eii_z_raw", row.get("EII_z")))
+        if np.isfinite(v):
+            return float(np.clip(v, -12.0, 12.0))
+        return float("nan")
+    if feature_name == "q_emp":
+        v = _safe_float(row.get("q_emp"))
+        if np.isfinite(v):
+            return float(np.clip(v, 0.0, 1.0))
+        return float("nan")
+    if feature_name == "neglog10_q_emp":
+        qv = _feature_value(row, "q_emp")
+        if np.isfinite(qv):
+            return float(-np.log10(max(qv, 1e-12)))
+        return 0.0
+    if feature_name == "dispersion_ratio":
+        direct = _safe_float(row.get("dispersion_ratio"))
+        if np.isfinite(direct):
+            return max(0.0, float(direct))
+        d_obs = _safe_float(row.get("D_obs"))
+        mu0 = _safe_float(row.get("mu0"))
+        if np.isfinite(d_obs) and np.isfinite(mu0) and mu0 > 0:
+            return max(0.0, float(d_obs / mu0))
+        return float("nan")
+    if feature_name == "dispersion_ratio_clipped":
+        ratio = _feature_value(row, "dispersion_ratio")
+        if np.isfinite(ratio):
+            return float(np.clip(ratio, 0.0, 10.0))
+        return 0.0
+    if feature_name == "sigma0_final":
+        for key in ("sigma0_final", "sigma0", "neutral_sd_floored", "neutral_sd"):
+            v = _safe_float(row.get(key))
+            if np.isfinite(v):
+                return max(0.0, float(v))
+        return float("nan")
+    if feature_name == "sigma0_inverse":
+        s0 = _feature_value(row, "sigma0_final")
+        if np.isfinite(s0):
+            return float(1.0 / max(s0, 1e-8))
+        return float("nan")
     if feature_name.startswith("log1p_"):
         base_name = feature_name[len("log1p_") :]
         base = _feature_value(row, base_name)
@@ -216,6 +256,97 @@ def _fit_linear_score_isotonic(
         "isotonic_calibrator": iso,
         "logistic_calibrator": logi,
         "blend_weight_isotonic": float(blend_weight_iso),
+    }
+
+
+def _fit_nonnegative_logistic_score(
+    xz: np.ndarray,
+    y: np.ndarray,
+    *,
+    ridge_lambda: float = 1e-3,
+    max_iter: int = 2000,
+    lr: float = 0.15,
+) -> tuple[np.ndarray, float]:
+    y = np.asarray(y, dtype=float)
+    xz = np.asarray(xz, dtype=float)
+    if xz.ndim != 2:
+        raise ValueError("xz must be 2D")
+    n, p = xz.shape
+    if n == 0:
+        raise ValueError("No rows for nonnegative score fit.")
+    mean_t = float(np.clip(np.mean(y), 1e-4, 1.0 - 1e-4))
+    intercept = float(np.log(mean_t / (1.0 - mean_t)))
+    coef = np.zeros(p, dtype=float)
+
+    def _loss(b: float, w: np.ndarray) -> float:
+        s = b + xz @ w
+        p_hat = _sigmoid(s)
+        eps = 1e-8
+        nll = -np.mean(y * np.log(p_hat + eps) + (1.0 - y) * np.log(1.0 - p_hat + eps))
+        reg = 0.5 * float(ridge_lambda) * float(np.sum(w * w))
+        return float(nll + reg)
+
+    prev = float("inf")
+    for _ in range(int(max_iter)):
+        s = intercept + xz @ coef
+        p_hat = _sigmoid(s)
+        grad_w = (xz.T @ (p_hat - y)) / float(n) + float(ridge_lambda) * coef
+        grad_b = float(np.mean(p_hat - y))
+        base_loss = _loss(intercept, coef)
+        step = float(lr)
+        updated = False
+        for _ls in range(25):
+            cand_w = np.maximum(0.0, coef - step * grad_w)
+            cand_b = float(intercept - step * grad_b)
+            cand_loss = _loss(cand_b, cand_w)
+            if cand_loss <= base_loss + 1e-10:
+                coef = cand_w
+                intercept = cand_b
+                updated = True
+                break
+            step *= 0.5
+        if not updated:
+            break
+        current = _loss(intercept, coef)
+        if abs(prev - current) < 1e-9:
+            break
+        prev = current
+    return coef.astype(float), float(intercept)
+
+
+def _fit_monotone_evidence_model(
+    rows: List[Mapping[str, Any]],
+    *,
+    label_key: str,
+    evidence_features: List[str],
+    ridge_lambda: float = 1e-3,
+) -> Dict[str, Any]:
+    x_raw = _rows_to_matrix(rows, evidence_features)
+    y = np.asarray([int(float(r[label_key])) for r in rows], dtype=float)
+    if x_raw.size == 0:
+        raise ValueError(f"No rows available for target {label_key}.")
+    mu = np.mean(x_raw, axis=0)
+    sigma = np.std(x_raw, axis=0)
+    sigma = np.where(sigma > 1e-8, sigma, 1.0)
+    xz = (x_raw - mu) / sigma
+    coef, intercept = _fit_nonnegative_logistic_score(
+        xz,
+        y,
+        ridge_lambda=float(ridge_lambda),
+    )
+    score = intercept + (xz @ coef)
+    iso = fit_isotonic_binary(score, y)
+    return {
+        "type": "linear_score_isotonic",
+        "score_design": "monotone_evidence_nonnegative",
+        "evidence_features_only": True,
+        "monotonic_directions": {name: "nondecreasing" for name in evidence_features},
+        "feature_names": list(evidence_features),
+        "feature_mean": mu.astype(float).tolist(),
+        "feature_scale": sigma.astype(float).tolist(),
+        "coef": coef.astype(float).tolist(),
+        "intercept": float(intercept),
+        "isotonic_calibrator": iso,
     }
 
 
@@ -363,8 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--metrics-tsv", required=True)
     p.add_argument("--outdir", required=True)
     p.add_argument("--calibration-version", default="ceii_v2")
-    p.add_argument("--tau-gene", type=float, default=0.42)
-    p.add_argument("--tau-site", type=float, default=0.45)
+    p.add_argument("--tau-gene", type=float, default=None)
+    p.add_argument("--tau-site", type=float, default=None)
+    p.add_argument("--label-profile", choices=["auto", "v2", "v3"], default="auto")
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
     p.add_argument("--target-fdr-site", type=float, default=0.10)
     p.add_argument("--bootstrap-reps", type=int, default=200)
@@ -373,6 +505,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--app-max-n-taxa", type=int, default=None)
     p.add_argument("--app-min-gene-length-nt", type=int, default=None)
     p.add_argument("--app-max-gene-length-nt", type=int, default=None)
+    p.add_argument("--app-min-n-branches", type=int, default=None)
+    p.add_argument("--app-max-n-branches", type=int, default=None)
     p.add_argument("--near-boundary-fraction", type=float, default=0.08)
     p.add_argument("--min-applicability-score", type=float, default=0.95)
     p.add_argument("--allow-near-boundary-calibration", action="store_true")
@@ -384,6 +518,7 @@ def main() -> int:
     args = build_parser().parse_args()
     outdir = Path(args.outdir).expanduser().resolve()
     outdir.mkdir(parents=True, exist_ok=True)
+    calibration_version = str(args.calibration_version)
 
     rows = _read_tsv(args.metrics_tsv)
     if not rows:
@@ -394,8 +529,30 @@ def main() -> int:
         extra = compute_truth_aware_metrics(row)
         augmented.append({**row, **extra})
 
+    label_profile = str(args.label_profile)
+    if label_profile == "auto":
+        label_profile = "v3" if calibration_version.startswith("ceii_v3") else "v2"
+    tau_gene = float(args.tau_gene) if args.tau_gene is not None else (0.50 if label_profile == "v3" else 0.42)
+    tau_site = float(args.tau_site) if args.tau_site is not None else (0.55 if label_profile == "v3" else 0.45)
+
     attach_scenario_stability(augmented)
-    attach_recoverability_targets(augmented, tau_gene=float(args.tau_gene), tau_site=float(args.tau_site))
+    if label_profile == "v3":
+        attach_recoverability_targets(
+            augmented,
+            tau_gene=tau_gene,
+            tau_site=tau_site,
+            rank_nan_fallback_gene=0.0,
+            rank_nan_fallback_site=0.0,
+            gene_weights=(0.55, 0.30, 0.15),
+            site_weights=(0.50, 0.35, 0.15),
+            use_stability_gating=True,
+        )
+    else:
+        attach_recoverability_targets(
+            augmented,
+            tau_gene=tau_gene,
+            tau_site=tau_site,
+        )
     assign_scenario_splits(augmented, seed=int(args.seed))
 
     # cEII calibration is valid only when the null-dispersion layer was numerically valid.
@@ -424,26 +581,48 @@ def main() -> int:
     if not cal_rows:
         raise RuntimeError("Calibration split is empty after sigma-valid filtering.")
 
-    feature_names = [
-        "eii_z_raw",
-        "eii_01_raw",
-        "log1p_n_taxa",
-        "log1p_gene_length_nt",
-        "log1p_n_branches",
-    ]
+    if calibration_version.startswith("ceii_v3"):
+        feature_names = [
+            "eii_01_raw",
+            "eii_z_clipped",
+            "neglog10_q_emp",
+            "dispersion_ratio_clipped",
+        ]
+        feature_design = "stage2_evidence_only_monotone"
+    else:
+        feature_names = [
+            "eii_z_raw",
+            "eii_01_raw",
+            "log1p_n_taxa",
+            "log1p_gene_length_nt",
+            "log1p_n_branches",
+        ]
+        feature_design = "stage2_mixed_linear"
     y_gene_cal = np.asarray([int(r["I_gene"]) for r in cal_rows], dtype=int)
     y_site_cal = np.asarray([int(r["I_site"]) for r in cal_rows], dtype=int)
 
-    gene_model = _fit_linear_score_isotonic(
-        cal_rows,
-        label_key="I_gene",
-        feature_names=feature_names,
-    )
-    site_model = _fit_linear_score_isotonic(
-        cal_rows,
-        label_key="I_site",
-        feature_names=feature_names,
-    )
+    if calibration_version.startswith("ceii_v3"):
+        gene_model = _fit_monotone_evidence_model(
+            cal_rows,
+            label_key="I_gene",
+            evidence_features=feature_names,
+        )
+        site_model = _fit_monotone_evidence_model(
+            cal_rows,
+            label_key="I_site",
+            evidence_features=feature_names,
+        )
+    else:
+        gene_model = _fit_linear_score_isotonic(
+            cal_rows,
+            label_key="I_gene",
+            feature_names=feature_names,
+        )
+        site_model = _fit_linear_score_isotonic(
+            cal_rows,
+            label_key="I_site",
+            feature_names=feature_names,
+        )
 
     score_gene_cal = _predict_linear_score(gene_model, cal_rows)
     score_site_cal = _predict_linear_score(site_model, cal_rows)
@@ -516,6 +695,7 @@ def main() -> int:
         score_grid=score_gene_grid,
         bootstrap_reps=int(args.bootstrap_reps),
         seed=int(args.seed) + 101,
+        blend_with_logistic=not calibration_version.startswith("ceii_v3"),
     )
     site_ci = _bootstrap_ci_calibrator(
         score_site_cal,
@@ -523,6 +703,7 @@ def main() -> int:
         score_grid=score_site_grid,
         bootstrap_reps=int(args.bootstrap_reps),
         seed=int(args.seed) + 202,
+        blend_with_logistic=not calibration_version.startswith("ceii_v3"),
     )
 
     gene_model["prediction_ci"] = {
@@ -536,11 +717,23 @@ def main() -> int:
 
     cal_taxa = np.asarray([int(float(r["n_taxa"])) for r in cal_rows], dtype=int)
     cal_len = np.asarray([int(float(r["gene_length_nt"])) for r in cal_rows], dtype=int)
+    cal_br = np.asarray([_feature_value(r, "n_branches") for r in cal_rows], dtype=float)
+    cal_br = cal_br[np.isfinite(cal_br)]
 
     app_min_n_taxa = int(np.min(cal_taxa)) if args.app_min_n_taxa is None else int(args.app_min_n_taxa)
     app_max_n_taxa = int(np.max(cal_taxa)) if args.app_max_n_taxa is None else int(args.app_max_n_taxa)
     app_min_gene_len = int(np.min(cal_len)) if args.app_min_gene_length_nt is None else int(args.app_min_gene_length_nt)
     app_max_gene_len = int(np.max(cal_len)) if args.app_max_gene_length_nt is None else int(args.app_max_gene_length_nt)
+    app_min_n_branches = (
+        int(np.min(cal_br))
+        if args.app_min_n_branches is None and cal_br.size > 0
+        else int(args.app_min_n_branches if args.app_min_n_branches is not None else 1)
+    )
+    app_max_n_branches = (
+        int(np.max(cal_br))
+        if args.app_max_n_branches is None and cal_br.size > 0
+        else int(args.app_max_n_branches if args.app_max_n_branches is not None else max(app_min_n_branches, 1))
+    )
 
     regime_groups: Dict[str, Dict[str, Any]] = {}
     for row in cal_rows:
@@ -553,9 +746,12 @@ def main() -> int:
                 str(row.get("mutation_rate_heterogeneity_bin", "unknown")),
             ]
         )
-        bucket = regime_groups.setdefault(name, {"n_taxa": [], "gene_length_nt": []})
+        bucket = regime_groups.setdefault(name, {"n_taxa": [], "gene_length_nt": [], "n_branches": []})
         bucket["n_taxa"].append(float(row["n_taxa"]))
         bucket["gene_length_nt"].append(float(row["gene_length_nt"]))
+        br = _feature_value(row, "n_branches")
+        if np.isfinite(br):
+            bucket["n_branches"].append(float(br))
 
     supported_regimes = []
     for name, vals in sorted(regime_groups.items()):
@@ -565,27 +761,56 @@ def main() -> int:
                 "center": {
                     "n_taxa": float(np.median(np.asarray(vals["n_taxa"], dtype=float))),
                     "gene_length_nt": float(np.median(np.asarray(vals["gene_length_nt"], dtype=float))),
+                    "n_branches": (
+                        float(np.median(np.asarray(vals["n_branches"], dtype=float)))
+                        if vals["n_branches"]
+                        else float("nan")
+                    ),
                 },
             }
         )
 
+    target_definitions: Dict[str, str]
+    if label_profile == "v3":
+        target_definitions = {
+            "R_gene": (
+                "0.55*branch_rank_norm + 0.30*burden_alignment + "
+                "0.15*(scenario_branch_stability * max(branch_rank_norm, burden_alignment)); "
+                "NaN branch rank fallback=0.0"
+            ),
+            "R_site": (
+                "0.50*site_enrichment_at_k + 0.35*site_rank_norm + "
+                "0.15*(scenario_site_stability * max(site_enrichment_at_k, site_rank_norm)); "
+                "NaN site rank fallback=0.0"
+            ),
+            "I_gene": f"1 if R_gene >= {tau_gene:.2f} else 0",
+            "I_site": f"1 if R_site >= {tau_site:.2f} else 0",
+        }
+    else:
+        target_definitions = {
+            "R_gene": "0.45*branch_rank_norm + 0.35*burden_alignment + 0.20*scenario_branch_stability",
+            "R_site": "0.45*site_enrichment_at_k + 0.35*site_rank_norm + 0.20*scenario_site_stability",
+            "I_gene": f"1 if R_gene >= {tau_gene:.2f} else 0",
+            "I_site": f"1 if R_site >= {tau_site:.2f} else 0",
+        }
+
     asset = {
-        "calibration_version": str(args.calibration_version),
+        "calibration_version": calibration_version,
         "d_obs_definition": D_OBS_DEFINITION,
         "raw_eii_definition": "eii_z_raw = (D_obs - mu0) / max(sigma0_raw, sigma_floor), eii_01_raw = sigmoid(eii_z_raw)",
         "calibration_semantics": (
             "cEII is a conditional calibrated identifiability probability valid only when "
             "applicability criteria are satisfied; otherwise calibration abstains."
         ),
-        "target_definitions": {
-            "R_gene": "0.45*branch_rank_norm + 0.35*burden_alignment + 0.20*scenario_branch_stability",
-            "R_site": "0.45*site_enrichment_at_k + 0.35*site_rank_norm + 0.20*scenario_site_stability",
-            "I_gene": f"1 if R_gene >= {float(args.tau_gene):.2f} else 0",
-            "I_site": f"1 if R_site >= {float(args.tau_site):.2f} else 0",
+        "feature_set": {
+            "stage1_support_features": ["n_taxa", "gene_length_nt", "n_branches"],
+            "stage2_evidence_features": list(feature_names),
+            "stage2_design": feature_design,
         },
+        "target_definitions": target_definitions,
         "gene_model": gene_model,
         "site_model": site_model,
-        # Legacy compatibility fields retained for older consumers; ceii_v2 should use *_model.
+        # Compatibility fields retained for older consumers; ceii_v2 should use *_model.
         "gene_calibrator": gene_model["isotonic_calibrator"],
         "site_calibrator": site_model["isotonic_calibrator"],
         "prediction_ci": {
@@ -626,6 +851,7 @@ def main() -> int:
             "features": {
                 "n_taxa": {"min": app_min_n_taxa, "max": app_max_n_taxa},
                 "gene_length_nt": {"min": app_min_gene_len, "max": app_max_gene_len},
+                "n_branches": {"min": app_min_n_branches, "max": app_max_n_branches},
             },
             "near_boundary_fraction": float(args.near_boundary_fraction),
             "min_applicability_score_for_calibration": float(args.min_applicability_score),
@@ -636,6 +862,9 @@ def main() -> int:
             "metrics_tsv_name": str(Path(args.metrics_tsv).name),
             "bootstrap_reps": int(args.bootstrap_reps),
             "seed": int(args.seed),
+            "label_profile": label_profile,
+            "tau_gene": tau_gene,
+            "tau_site": tau_site,
             "split_counts": {
                 "train": int(sum(1 for r in augmented if str(r.get("split")) == "train")),
                 "calibration": int(sum(1 for r in augmented if str(r.get("split")) == "calibration")),
@@ -712,7 +941,9 @@ def main() -> int:
     )
 
     if args.write_package_asset:
-        if str(args.calibration_version).startswith("ceii_v2"):
+        if calibration_version.startswith("ceii_v3"):
+            pkg_name = "ceii_calibration_v3.json"
+        elif calibration_version.startswith("ceii_v2"):
             pkg_name = "ceii_calibration_v2.json"
         else:
             pkg_name = "ceii_calibration_v1.json"
@@ -726,7 +957,7 @@ def main() -> int:
         "split_performance_tsv": str(outdir / "ceii_split_performance.tsv"),
         "reliability_tsv": str(outdir / "ceii_reliability.tsv"),
         "applicability_summary_json": str(outdir / "ceii_applicability_summary.json"),
-        "calibration_version": str(args.calibration_version),
+        "calibration_version": calibration_version,
     }
     (outdir / "ceii_calibration_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
