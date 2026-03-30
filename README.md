@@ -1,6 +1,7 @@
 # BABAPPAi (`babappai`)
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19216760.svg)](https://doi.org/10.5281/zenodo.19216760)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19337788.svg)](https://doi.org/10.5281/zenodo.19337788)
 
 [![CI](https://github.com/sinhakrishnendu/BABAPPAi/actions/workflows/ci.yml/badge.svg)](https://github.com/sinhakrishnendu/BABAPPAi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
