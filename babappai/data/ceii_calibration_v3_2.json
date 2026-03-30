@@ -1,0 +1,455 @@
+{
+  "calibration_version": "ceii_v3.2",
+  "d_obs_definition": "Two-sided 5% winsorized sample variance (ddof=1) of site-level mean branch logits (site_logit_mean) across codon sites for the observed alignment.",
+  "raw_eii_definition": "eii_z_raw = (D_obs - mu0) / max(sigma0_raw, sigma_floor), eii_01_raw = sigmoid(eii_z_raw)",
+  "calibration_semantics": "cEII is a conditional calibrated identifiability probability valid only when applicability criteria are satisfied; otherwise calibration abstains.",
+  "feature_set": {
+    "stage1_support_features": [
+      "n_taxa",
+      "gene_length_nt",
+      "n_branches"
+    ],
+    "stage2_evidence_features": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "stage2_design": "stage2_evidence_only_monotone_split"
+  },
+  "target_definitions": {
+    "R_gene": "0.55*branch_rank_norm + 0.30*burden_alignment + 0.15*(scenario_branch_stability * max(branch_rank_norm, burden_alignment)); NaN branch rank fallback=0.0",
+    "R_site": "0.50*site_enrichment_at_k + 0.35*site_rank_norm + 0.15*(scenario_site_stability * max(site_enrichment_at_k, site_rank_norm)); NaN site rank fallback=0.0",
+    "excess_over_neutral_gate": "excess_evidence_score >= 0.3500 AND excess_evidence_score combines nonnegative contributions from -log10(q_emp), dispersion_ratio, and eii_01_raw",
+    "I_gene_recovery_only": "1 if R_gene >= 0.26 else 0",
+    "I_site_recovery_only": "1 if R_site >= 0.16 else 0",
+    "I_gene": "1 if (I_gene_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0",
+    "I_site": "1 if (I_site_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0"
+  },
+  "gene_model": {
+    "type": "linear_score_isotonic",
+    "score_design": "monotone_evidence_nonnegative",
+    "evidence_features_only": true,
+    "monotonic_directions": {
+      "eii_01_raw": "nondecreasing",
+      "eii_z_clipped": "nondecreasing",
+      "neglog10_q_emp": "nondecreasing",
+      "dispersion_ratio_clipped": "nondecreasing"
+    },
+    "feature_names": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "feature_mean": [
+      0.27794096419296244,
+      -2.599287743064317,
+      0.19109074147450258,
+      0.7144875737978174
+    ],
+    "feature_scale": [
+      0.4160236425811534,
+      5.863230021599677,
+      0.33097887308984775,
+      0.5790064636128386
+    ],
+    "coef": [
+      1.7943017445957532,
+      1.0022250457755861,
+      1.8362447375503999,
+      1.0484288237893982
+    ],
+    "intercept": -3.0305476908481435,
+    "isotonic_calibrator": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        5.741018455581671
+      ],
+      "y": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "logistic_calibrator": {
+      "a": 1.434372924715591,
+      "b": 0.8926649039129985
+    },
+    "blend_weight_isotonic": 0.35,
+    "isotonic_fit_source": "calibration",
+    "prediction_ci": {
+      "lower": {
+        "x": [
+          -7.568212246286449,
+          -7.382114757287741,
+          5.741018455581671
+        ],
+        "y": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "upper": {
+        "x": [
+          -7.568212246286449,
+          -7.382114757287741,
+          5.741018455581671
+        ],
+        "y": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  },
+  "site_model": {
+    "type": "linear_score_isotonic",
+    "score_design": "monotone_evidence_nonnegative",
+    "evidence_features_only": true,
+    "monotonic_directions": {
+      "eii_01_raw": "nondecreasing",
+      "eii_z_clipped": "nondecreasing",
+      "neglog10_q_emp": "nondecreasing",
+      "dispersion_ratio_clipped": "nondecreasing"
+    },
+    "feature_names": [
+      "eii_01_raw",
+      "eii_z_clipped",
+      "neglog10_q_emp",
+      "dispersion_ratio_clipped"
+    ],
+    "feature_mean": [
+      0.27794096419296244,
+      -2.599287743064317,
+      0.19109074147450258,
+      0.7144875737978174
+    ],
+    "feature_scale": [
+      0.4160236425811534,
+      5.863230021599677,
+      0.33097887308984775,
+      0.5790064636128386
+    ],
+    "coef": [
+      1.7943017445957532,
+      1.0022250457755861,
+      1.8362447375503999,
+      1.0484288237893982
+    ],
+    "intercept": -3.0305476908481435,
+    "isotonic_calibrator": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        -7.273910340881726,
+        -6.202842357759495,
+        -4.94869148272879,
+        5.741018455581671,
+        6.303253417977437
+      ],
+      "y": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "logistic_calibrator": {
+      "a": 13.247954527465382,
+      "b": -79.78098304860178
+    },
+    "blend_weight_isotonic": 0.35,
+    "isotonic_fit_source": "train_plus_calibration_single_class_fallback",
+    "prediction_ci": {
+      "lower": {
+        "x": [
+          -7.568212246286449,
+          -7.382114757287741,
+          -7.273910340881726,
+          -6.202842357759495,
+          -4.94869148272879,
+          5.741018455581671,
+          6.303253417977437
+        ],
+        "y": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "upper": {
+        "x": [
+          -7.568212246286449,
+          -7.382114757287741,
+          -7.273910340881726,
+          -6.202842357759495,
+          -4.94869148272879,
+          5.741018455581671,
+          6.303253417977437
+        ],
+        "y": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    }
+  },
+  "gene_calibrator": {
+    "x": [
+      -7.568212246286449,
+      -7.382114757287741,
+      5.741018455581671
+    ],
+    "y": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "site_calibrator": {
+    "x": [
+      -7.568212246286449,
+      -7.382114757287741,
+      -7.273910340881726,
+      -6.202842357759495,
+      -4.94869148272879,
+      5.741018455581671,
+      6.303253417977437
+    ],
+    "y": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "prediction_ci": {
+    "gene_lower": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        5.741018455581671
+      ],
+      "y": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "gene_upper": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        5.741018455581671
+      ],
+      "y": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "site_lower": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        -7.273910340881726,
+        -6.202842357759495,
+        -4.94869148272879,
+        5.741018455581671,
+        6.303253417977437
+      ],
+      "y": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "site_upper": {
+      "x": [
+        -7.568212246286449,
+        -7.382114757287741,
+        -7.273910340881726,
+        -6.202842357759495,
+        -4.94869148272879,
+        5.741018455581671,
+        6.303253417977437
+      ],
+      "y": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "thresholds": {
+    "gene": {
+      "threshold": 0.9999293885250468,
+      "target_fdr": 0.1,
+      "weak_threshold": 0.8999293885250468,
+      "strong_threshold": 1.0
+    },
+    "site": {
+      "threshold": 0.01,
+      "target_fdr": 0.1,
+      "weak_threshold": 0.0,
+      "strong_threshold": 0.011486973034886803
+    }
+  },
+  "classes": {
+    "gene": [
+      {
+        "label": "not_identifiable",
+        "min": 0.0,
+        "max": 0.8999293885250468
+      },
+      {
+        "label": "weak_or_ambiguous",
+        "min": 0.8999293885250468,
+        "max": 0.9999293885250468
+      },
+      {
+        "label": "identifiable",
+        "min": 0.9999293885250468,
+        "max": 1.0
+      },
+      {
+        "label": "strongly_identifiable",
+        "min": 1.0,
+        "max": 1.0
+      }
+    ],
+    "site": [
+      {
+        "label": "not_identifiable",
+        "min": 0.0,
+        "max": 0.0
+      },
+      {
+        "label": "weak_or_ambiguous",
+        "min": 0.0,
+        "max": 0.01
+      },
+      {
+        "label": "identifiable",
+        "min": 0.01,
+        "max": 0.011486973034886803
+      },
+      {
+        "label": "strongly_identifiable",
+        "min": 0.011486973034886803,
+        "max": 1.0
+      }
+    ]
+  },
+  "applicability": {
+    "features": {
+      "n_taxa": {
+        "min": 8,
+        "max": 64
+      },
+      "gene_length_nt": {
+        "min": 120,
+        "max": 4500
+      },
+      "n_branches": {
+        "min": 13,
+        "max": 125
+      }
+    },
+    "near_boundary_fraction": 0.08,
+    "min_applicability_score_for_calibration": 0.95,
+    "allow_near_boundary_calibration": false,
+    "supported_regimes": [
+      {
+        "name": "large_deep|medium|none|mild|high",
+        "center": {
+          "n_taxa": 24.0,
+          "gene_length_nt": 1635.0,
+          "n_branches": 45.0
+        }
+      },
+      {
+        "name": "medium|very_short|moderate|high|moderate",
+        "center": {
+          "n_taxa": 16.0,
+          "gene_length_nt": 588.0,
+          "n_branches": 29.0
+        }
+      },
+      {
+        "name": "very_large|long|none|none|low",
+        "center": {
+          "n_taxa": 40.0,
+          "gene_length_nt": 2541.0,
+          "n_branches": 77.0
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "metrics_tsv_name": "full_pipeline_gene_metrics.tsv",
+    "bootstrap_reps": 200,
+    "seed": 123,
+    "label_profile": "v3_2",
+    "tau_gene": 0.2606248332496719,
+    "tau_site": 0.1556214170664456,
+    "split_counts": {
+      "train": 4,
+      "calibration": 3,
+      "test": 4,
+      "ood": 5
+    },
+    "split_counts_sigma_valid": {
+      "train": 4,
+      "calibration": 3,
+      "test": 4,
+      "ood": 5
+    },
+    "n_rows_total": 16,
+    "n_rows_sigma_valid": 16,
+    "evidence_gate": {
+      "min_true_burden_for_signal_present": 0.01,
+      "neutral_fpr_target": 0.1,
+      "max_q_emp_for_identifiable": 0.95,
+      "min_neglog10_q_emp_for_identifiable": 0.022276394711152253,
+      "min_dispersion_ratio_for_identifiable": 1.05,
+      "min_eii_01_for_identifiable": 0.5,
+      "min_excess_evidence_score_for_identifiable": 0.35,
+      "n_train_rows": 4,
+      "n_neutral_rows_for_gate": 1
+    },
+    "recoverability_threshold_meta": {
+      "tau_gene": 0.2606248332496719,
+      "tau_site": 0.1556214170664456,
+      "n_train_rows": 4,
+      "n_signal_rows": 3
+    }
+  }
+}

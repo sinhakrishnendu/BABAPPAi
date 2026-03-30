@@ -14,6 +14,7 @@ from babappai.calibration.ceii import (
     load_calibration_asset,
     predict_isotonic,
     save_calibration_asset,
+    trace_ceii_calibration,
 )
 
 
@@ -360,3 +361,24 @@ def test_ceii_v3_applicability_gate_uses_support_not_evidence() -> None:
     )
     assert weak_q["applicability_status"] == strong_q["applicability_status"] == "in_domain"
     assert abs(float(weak_q["applicability_score"]) - float(strong_q["applicability_score"])) < 1e-12
+
+
+def test_trace_ceii_calibration_exposes_stage_internals() -> None:
+    asset = _toy_v3_evidence_asset()
+    trace = trace_ceii_calibration(
+        eii_z_raw=1.25,
+        n_taxa=24,
+        gene_length_nt=1200,
+        n_branches=45,
+        q_emp=0.01,
+        dispersion_ratio=2.1,
+        sigma0_final=0.2,
+        asset=asset,
+    )
+    assert trace["applicability"]["applicability_status"] == "in_domain"
+    assert trace["applicability"]["should_calibrate"] is True
+    assert "eii_01_raw" in trace["evidence"]["values"]
+    assert "neglog10_q_emp" in trace["evidence"]["values"]
+    assert trace["gene_trace"]["score"] is not None
+    assert trace["gene_trace"]["isotonic_output"] is not None
+    assert trace["final"]["ceii_gene"] is not None

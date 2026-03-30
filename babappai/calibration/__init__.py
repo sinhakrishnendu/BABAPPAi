@@ -111,6 +111,7 @@ try:  # pragma: no cover - import availability is validated in dedicated tests.
         apply_ceii_calibration,
         default_calibration_asset_path,
         load_calibration_asset,
+        trace_ceii_calibration,
     )
 
     __all__.extend(
@@ -119,6 +120,7 @@ try:  # pragma: no cover - import availability is validated in dedicated tests.
             "apply_ceii_calibration",
             "default_calibration_asset_path",
             "load_calibration_asset",
+            "trace_ceii_calibration",
         ]
     )
 except Exception:

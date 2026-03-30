@@ -151,6 +151,74 @@ def _derive_excess_gate_from_train(
     }
 
 
+def _best_balanced_threshold(scores: np.ndarray, labels: np.ndarray, *, default: float) -> float:
+    x = np.asarray(scores, dtype=float)
+    y = np.asarray(labels, dtype=int)
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+    if x.size < 4 or np.unique(y).size < 2:
+        return float(default)
+
+    candidates = np.unique(x)
+    best_thr = float(default)
+    best_bal = -1.0
+    for thr in candidates.tolist():
+        pred = (x >= float(thr)).astype(int)
+        tp = int(np.sum((pred == 1) & (y == 1)))
+        fn = int(np.sum((pred == 0) & (y == 1)))
+        tn = int(np.sum((pred == 0) & (y == 0)))
+        fp = int(np.sum((pred == 1) & (y == 0)))
+        tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        tnr = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        bal = 0.5 * (tpr + tnr)
+        if bal > best_bal:
+            best_bal = float(bal)
+            best_thr = float(thr)
+    return float(best_thr)
+
+
+def _derive_recoverability_thresholds_from_train(
+    rows: List[Mapping[str, Any]],
+    *,
+    min_true_burden: float,
+    default_tau_gene: float,
+    default_tau_site: float,
+) -> Dict[str, float]:
+    train_rows = _subset(rows, "train")
+    if not train_rows:
+        train_rows = list(rows)
+    if not train_rows:
+        return {
+            "tau_gene": float(default_tau_gene),
+            "tau_site": float(default_tau_site),
+            "n_train_rows": 0,
+            "n_signal_rows": 0,
+        }
+
+    y_signal = np.asarray(
+        [
+            1 if _signal_present_from_truth(r, min_true_burden=float(min_true_burden)) else 0
+            for r in train_rows
+        ],
+        dtype=int,
+    )
+    r_gene = np.asarray([_safe_float(r.get("R_gene")) for r in train_rows], dtype=float)
+    r_site = np.asarray([_safe_float(r.get("R_site")) for r in train_rows], dtype=float)
+    tau_gene = _best_balanced_threshold(r_gene, y_signal, default=float(default_tau_gene))
+    tau_site = _best_balanced_threshold(r_site, y_signal, default=float(default_tau_site))
+
+    # Keep thresholds in valid probability range and avoid pathological extremes.
+    tau_gene = float(np.clip(tau_gene, 0.05, 0.95))
+    tau_site = float(np.clip(tau_site, 0.05, 0.95))
+    return {
+        "tau_gene": tau_gene,
+        "tau_site": tau_site,
+        "n_train_rows": int(len(train_rows)),
+        "n_signal_rows": int(np.sum(y_signal)),
+    }
+
+
 def _safe_float(value: Any) -> float:
     try:
         out = float(value)
@@ -448,6 +516,56 @@ def _fit_monotone_evidence_model(
     }
 
 
+def _fit_monotone_evidence_model_split(
+    train_rows: List[Mapping[str, Any]],
+    cal_rows: List[Mapping[str, Any]],
+    *,
+    label_key: str,
+    evidence_features: List[str],
+    ridge_lambda: float = 1e-3,
+) -> Dict[str, Any]:
+    """Fit monotone evidence score on train, calibrate score->probability on calibration."""
+    if not train_rows:
+        raise ValueError(f"Training split is empty for target {label_key}.")
+    if not cal_rows:
+        raise ValueError(f"Calibration split is empty for target {label_key}.")
+
+    model = _fit_monotone_evidence_model(
+        train_rows,
+        label_key=label_key,
+        evidence_features=evidence_features,
+        ridge_lambda=float(ridge_lambda),
+    )
+
+    score_cal = _predict_linear_score(model, cal_rows)
+    y_cal = np.asarray([int(float(r[label_key])) for r in cal_rows], dtype=float)
+    unique_cal = np.unique(y_cal[np.isfinite(y_cal)])
+
+    if unique_cal.size < 2:
+        # Small calibration splits can be single-class. Fall back to train+cal
+        # for isotonic shape learning while keeping score weights train-derived.
+        fit_rows = list(train_rows) + list(cal_rows)
+        score_iso = _predict_linear_score(model, fit_rows)
+        y_iso = np.asarray([int(float(r[label_key])) for r in fit_rows], dtype=float)
+        isotonic_source = "train_plus_calibration_single_class_fallback"
+    else:
+        score_iso = score_cal
+        y_iso = y_cal
+        isotonic_source = "calibration"
+
+    iso = fit_isotonic_binary(score_iso, y_iso)
+    logi = _fit_logistic_1d(score_iso, y_iso)
+    p_iso = predict_isotonic(iso, score_iso)
+    iso_unique = len(np.unique(np.round(p_iso, 6)))
+    blend_weight_iso = 0.35 if iso_unique <= 2 else 0.80
+
+    model["isotonic_calibrator"] = iso
+    model["logistic_calibrator"] = logi
+    model["blend_weight_isotonic"] = float(blend_weight_iso)
+    model["isotonic_fit_source"] = isotonic_source
+    return model
+
+
 def _predict_linear_score(model: Mapping[str, Any], rows: List[Mapping[str, Any]]) -> np.ndarray:
     feature_names = [str(x) for x in model.get("feature_names", [])]
     if not feature_names:
@@ -591,10 +709,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--metrics-tsv", required=True)
     p.add_argument("--outdir", required=True)
-    p.add_argument("--calibration-version", default="ceii_v3.1")
+    p.add_argument("--calibration-version", default="ceii_v3.2")
     p.add_argument("--tau-gene", type=float, default=None)
     p.add_argument("--tau-site", type=float, default=None)
-    p.add_argument("--label-profile", choices=["auto", "v2", "v3", "v3_1"], default="auto")
+    p.add_argument("--label-profile", choices=["auto", "v2", "v3", "v3_1", "v3_2"], default="auto")
     p.add_argument("--excess-neutral-fpr-target", type=float, default=0.10)
     p.add_argument("--signal-present-min-true-burden", type=float, default=0.01)
     p.add_argument("--target-fdr-gene", type=float, default=0.10)
@@ -631,7 +749,9 @@ def main() -> int:
 
     label_profile = str(args.label_profile)
     if label_profile == "auto":
-        if calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
+        if calibration_version.startswith("ceii_v3.2") or calibration_version.startswith("ceii_v3_2"):
+            label_profile = "v3_2"
+        elif calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
             label_profile = "v3_1"
         elif calibration_version.startswith("ceii_v3"):
             label_profile = "v3"
@@ -641,31 +761,70 @@ def main() -> int:
     tau_site = float(args.tau_site) if args.tau_site is not None else 0.45
 
     attach_scenario_stability(augmented)
-    if label_profile == "v3_1":
+    recoverability_threshold_meta: Dict[str, Any] = {}
+    if label_profile in {"v3_1", "v3_2"}:
         assign_scenario_splits(augmented, seed=int(args.seed))
         evidence_gate = _derive_excess_gate_from_train(
             augmented,
             min_true_burden=float(args.signal_present_min_true_burden),
             neutral_fpr_target=float(args.excess_neutral_fpr_target),
         )
-        attach_recoverability_targets(
-            augmented,
-            tau_gene=tau_gene,
-            tau_site=tau_site,
-            rank_nan_fallback_gene=0.0,
-            rank_nan_fallback_site=0.0,
-            gene_weights=(0.55, 0.30, 0.15),
-            site_weights=(0.50, 0.35, 0.15),
-            use_stability_gating=True,
-            require_excess_over_neutral_for_identifiable=True,
-            max_q_emp_for_identifiable=float(evidence_gate["max_q_emp_for_identifiable"]),
-            min_neglog10_q_emp_for_identifiable=float(evidence_gate["min_neglog10_q_emp_for_identifiable"]),
-            min_dispersion_ratio_for_identifiable=float(evidence_gate["min_dispersion_ratio_for_identifiable"]),
-            min_eii_01_for_identifiable=float(evidence_gate["min_eii_01_for_identifiable"]),
-            min_excess_evidence_score_for_identifiable=float(
-                evidence_gate["min_excess_evidence_score_for_identifiable"]
-            ),
-        )
+        if label_profile == "v3_2":
+            # First pass computes continuous R targets for data-driven thresholding.
+            attach_recoverability_targets(
+                augmented,
+                tau_gene=tau_gene,
+                tau_site=tau_site,
+                rank_nan_fallback_gene=0.0,
+                rank_nan_fallback_site=0.0,
+                gene_weights=(0.55, 0.30, 0.15),
+                site_weights=(0.50, 0.35, 0.15),
+                use_stability_gating=True,
+                require_excess_over_neutral_for_identifiable=False,
+            )
+            recoverability_threshold_meta = _derive_recoverability_thresholds_from_train(
+                augmented,
+                min_true_burden=float(args.signal_present_min_true_burden),
+                default_tau_gene=float(tau_gene),
+                default_tau_site=float(tau_site),
+            )
+            tau_gene = float(recoverability_threshold_meta["tau_gene"])
+            tau_site = float(recoverability_threshold_meta["tau_site"])
+            # v3.2: evidence-constrained target uses composite excess-over-neutral score
+            # as the required gate, avoiding hard support-prior leakage into labels.
+            attach_recoverability_targets(
+                augmented,
+                tau_gene=tau_gene,
+                tau_site=tau_site,
+                rank_nan_fallback_gene=0.0,
+                rank_nan_fallback_site=0.0,
+                gene_weights=(0.55, 0.30, 0.15),
+                site_weights=(0.50, 0.35, 0.15),
+                use_stability_gating=True,
+                require_excess_over_neutral_for_identifiable=True,
+                min_excess_evidence_score_for_identifiable=float(
+                    evidence_gate["min_excess_evidence_score_for_identifiable"]
+                ),
+            )
+        else:
+            attach_recoverability_targets(
+                augmented,
+                tau_gene=tau_gene,
+                tau_site=tau_site,
+                rank_nan_fallback_gene=0.0,
+                rank_nan_fallback_site=0.0,
+                gene_weights=(0.55, 0.30, 0.15),
+                site_weights=(0.50, 0.35, 0.15),
+                use_stability_gating=True,
+                require_excess_over_neutral_for_identifiable=True,
+                max_q_emp_for_identifiable=float(evidence_gate["max_q_emp_for_identifiable"]),
+                min_neglog10_q_emp_for_identifiable=float(evidence_gate["min_neglog10_q_emp_for_identifiable"]),
+                min_dispersion_ratio_for_identifiable=float(evidence_gate["min_dispersion_ratio_for_identifiable"]),
+                min_eii_01_for_identifiable=float(evidence_gate["min_eii_01_for_identifiable"]),
+                min_excess_evidence_score_for_identifiable=float(
+                    evidence_gate["min_excess_evidence_score_for_identifiable"]
+                ),
+            )
     elif label_profile == "v3":
         attach_recoverability_targets(
             augmented,
@@ -708,7 +867,10 @@ def main() -> int:
     _write_tsv(outdir / "recoverability_augmented.tsv", augmented)
 
     valid_rows = [r for r in augmented if int(r.get("sigma0_valid_for_calibration", 0)) == 1]
+    train_rows = _subset(valid_rows, "train")
     cal_rows = _subset(valid_rows, "calibration")
+    if not train_rows:
+        raise RuntimeError("Training split is empty after sigma-valid filtering.")
     if not cal_rows:
         raise RuntimeError("Calibration split is empty after sigma-valid filtering.")
 
@@ -719,7 +881,11 @@ def main() -> int:
             "neglog10_q_emp",
             "dispersion_ratio_clipped",
         ]
-        feature_design = "stage2_evidence_only_monotone"
+        feature_design = (
+            "stage2_evidence_only_monotone_split"
+            if calibration_version.startswith("ceii_v3.2") or label_profile == "v3_2"
+            else "stage2_evidence_only_monotone"
+        )
     else:
         feature_names = [
             "eii_z_raw",
@@ -733,24 +899,26 @@ def main() -> int:
     y_site_cal = np.asarray([int(r["I_site"]) for r in cal_rows], dtype=int)
 
     if calibration_version.startswith("ceii_v3"):
-        gene_model = _fit_monotone_evidence_model(
-            cal_rows,
+        gene_model = _fit_monotone_evidence_model_split(
+            train_rows=train_rows,
+            cal_rows=cal_rows,
             label_key="I_gene",
             evidence_features=feature_names,
         )
-        site_model = _fit_monotone_evidence_model(
-            cal_rows,
+        site_model = _fit_monotone_evidence_model_split(
+            train_rows=train_rows,
+            cal_rows=cal_rows,
             label_key="I_site",
             evidence_features=feature_names,
         )
     else:
         gene_model = _fit_linear_score_isotonic(
-            cal_rows,
+            train_rows,
             label_key="I_gene",
             feature_names=feature_names,
         )
         site_model = _fit_linear_score_isotonic(
-            cal_rows,
+            train_rows,
             label_key="I_site",
             feature_names=feature_names,
         )
@@ -846,24 +1014,28 @@ def main() -> int:
         "upper": {"x": site_ci["x"], "y": site_ci["upper"]},
     }
 
-    cal_taxa = np.asarray([int(float(r["n_taxa"])) for r in cal_rows], dtype=int)
-    cal_len = np.asarray([int(float(r["gene_length_nt"])) for r in cal_rows], dtype=int)
-    cal_br = np.asarray([_feature_value(r, "n_branches") for r in cal_rows], dtype=float)
-    cal_br = cal_br[np.isfinite(cal_br)]
+    valid_taxa = np.asarray([int(float(r["n_taxa"])) for r in valid_rows], dtype=int)
+    valid_len = np.asarray([int(float(r["gene_length_nt"])) for r in valid_rows], dtype=int)
+    valid_br = np.asarray([_feature_value(r, "n_branches") for r in valid_rows], dtype=float)
+    valid_br = valid_br[np.isfinite(valid_br)]
 
-    app_min_n_taxa = int(np.min(cal_taxa)) if args.app_min_n_taxa is None else int(args.app_min_n_taxa)
-    app_max_n_taxa = int(np.max(cal_taxa)) if args.app_max_n_taxa is None else int(args.app_max_n_taxa)
-    app_min_gene_len = int(np.min(cal_len)) if args.app_min_gene_length_nt is None else int(args.app_min_gene_length_nt)
-    app_max_gene_len = int(np.max(cal_len)) if args.app_max_gene_length_nt is None else int(args.app_max_gene_length_nt)
+    app_min_n_taxa = int(np.min(valid_taxa)) if args.app_min_n_taxa is None else int(args.app_min_n_taxa)
+    app_max_n_taxa = int(np.max(valid_taxa)) if args.app_max_n_taxa is None else int(args.app_max_n_taxa)
+    app_min_gene_len = int(np.min(valid_len)) if args.app_min_gene_length_nt is None else int(args.app_min_gene_length_nt)
+    app_max_gene_len = int(np.max(valid_len)) if args.app_max_gene_length_nt is None else int(args.app_max_gene_length_nt)
+    default_min_branches = max(1, 2 * int(app_min_n_taxa) - 3)
+    default_max_branches = max(default_min_branches, 2 * int(app_max_n_taxa) - 3)
+    observed_min_br = int(np.min(valid_br)) if valid_br.size > 0 else default_min_branches
+    observed_max_br = int(np.max(valid_br)) if valid_br.size > 0 else default_max_branches
     app_min_n_branches = (
-        int(np.min(cal_br))
-        if args.app_min_n_branches is None and cal_br.size > 0
-        else int(args.app_min_n_branches if args.app_min_n_branches is not None else 1)
+        int(args.app_min_n_branches)
+        if args.app_min_n_branches is not None
+        else min(observed_min_br, default_min_branches)
     )
     app_max_n_branches = (
-        int(np.max(cal_br))
-        if args.app_max_n_branches is None and cal_br.size > 0
-        else int(args.app_max_n_branches if args.app_max_n_branches is not None else max(app_min_n_branches, 1))
+        int(args.app_max_n_branches)
+        if args.app_max_n_branches is not None
+        else max(observed_max_br, default_max_branches)
     )
 
     regime_groups: Dict[str, Dict[str, Any]] = {}
@@ -902,7 +1074,30 @@ def main() -> int:
         )
 
     target_definitions: Dict[str, str]
-    if label_profile == "v3_1":
+    if label_profile == "v3_2":
+        gate_lines = [
+            f"excess_evidence_score >= {float(evidence_gate['min_excess_evidence_score_for_identifiable']):.4f}",
+            "excess_evidence_score combines nonnegative contributions from "
+            "-log10(q_emp), dispersion_ratio, and eii_01_raw",
+        ]
+        target_definitions = {
+            "R_gene": (
+                "0.55*branch_rank_norm + 0.30*burden_alignment + "
+                "0.15*(scenario_branch_stability * max(branch_rank_norm, burden_alignment)); "
+                "NaN branch rank fallback=0.0"
+            ),
+            "R_site": (
+                "0.50*site_enrichment_at_k + 0.35*site_rank_norm + "
+                "0.15*(scenario_site_stability * max(site_enrichment_at_k, site_rank_norm)); "
+                "NaN site rank fallback=0.0"
+            ),
+            "excess_over_neutral_gate": " AND ".join(gate_lines),
+            "I_gene_recovery_only": f"1 if R_gene >= {tau_gene:.2f} else 0",
+            "I_site_recovery_only": f"1 if R_site >= {tau_site:.2f} else 0",
+            "I_gene": f"1 if (I_gene_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0",
+            "I_site": f"1 if (I_site_recovery_only == 1 AND excess_over_neutral_gate == 1) else 0",
+        }
+    elif label_profile == "v3_1":
         gate_lines = [
             f"q_emp <= {float(evidence_gate['max_q_emp_for_identifiable']):.4f}",
             (
@@ -1036,7 +1231,8 @@ def main() -> int:
             },
             "n_rows_total": int(len(augmented)),
             "n_rows_sigma_valid": int(len(valid_rows)),
-            "evidence_gate": evidence_gate if label_profile == "v3_1" else {},
+            "evidence_gate": evidence_gate if label_profile in {"v3_1", "v3_2"} else {},
+            "recoverability_threshold_meta": recoverability_threshold_meta if label_profile == "v3_2" else {},
         },
     }
 
@@ -1099,7 +1295,9 @@ def main() -> int:
     )
 
     if args.write_package_asset:
-        if calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
+        if calibration_version.startswith("ceii_v3.2") or calibration_version.startswith("ceii_v3_2"):
+            pkg_name = "ceii_calibration_v3_2.json"
+        elif calibration_version.startswith("ceii_v3.1") or calibration_version.startswith("ceii_v3_1"):
             pkg_name = "ceii_calibration_v3_1.json"
         elif calibration_version.startswith("ceii_v3"):
             pkg_name = "ceii_calibration_v3.json"

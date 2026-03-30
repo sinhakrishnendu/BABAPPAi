@@ -18,6 +18,9 @@ D_OBS_DEFINITION = (
 
 def default_calibration_asset_path() -> Path:
     data_dir = Path(__file__).resolve().parent.parent / "data"
+    v3_2 = data_dir / "ceii_calibration_v3_2.json"
+    if v3_2.exists():
+        return v3_2
     v3_1 = data_dir / "ceii_calibration_v3_1.json"
     if v3_1.exists():
         return v3_1
@@ -712,6 +715,223 @@ def apply_ceii_calibration(
     }
 
 
+def trace_ceii_calibration(
+    *,
+    eii_z_raw: float,
+    n_taxa: int,
+    gene_length_nt: int,
+    n_branches: Optional[int] = None,
+    q_emp: Optional[float] = None,
+    dispersion_ratio: Optional[float] = None,
+    sigma0_final: Optional[float] = None,
+    extra_covariates: Optional[Mapping[str, float]] = None,
+    asset: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return detailed stage-wise cEII internals for debugging/calibration audits."""
+
+    support_covars: Dict[str, float] = {}
+    evidence_covars: Dict[str, float] = {}
+    reserved_evidence_keys = {
+        "q_emp",
+        "neglog10_q_emp",
+        "dispersion_ratio",
+        "dispersion_ratio_clipped",
+        "sigma0_final",
+        "sigma0_inverse",
+        "eii_z_raw",
+        "eii_01_raw",
+        "eii_z_clipped",
+    }
+    if extra_covariates:
+        for k, v in extra_covariates.items():
+            fv = _safe_float(v)
+            if fv is None:
+                continue
+            key = str(k)
+            if key in reserved_evidence_keys:
+                evidence_covars[key] = float(fv)
+            else:
+                support_covars[key] = float(fv)
+    if n_branches is not None and np.isfinite(float(n_branches)):
+        support_covars["n_branches"] = float(n_branches)
+    qv = _safe_float(q_emp)
+    if qv is not None:
+        evidence_covars["q_emp"] = float(qv)
+        evidence_covars["neglog10_q_emp"] = float(-math.log10(max(min(qv, 1.0), 1e-12)))
+    drv = _safe_float(dispersion_ratio)
+    if drv is not None:
+        evidence_covars["dispersion_ratio"] = float(max(drv, 0.0))
+        evidence_covars["dispersion_ratio_clipped"] = float(np.clip(max(drv, 0.0), 0.0, 10.0))
+    s0 = _safe_float(sigma0_final)
+    if s0 is not None:
+        evidence_covars["sigma0_final"] = float(max(s0, 0.0))
+        evidence_covars["sigma0_inverse"] = float(1.0 / max(float(s0), 1e-8))
+
+    applicability_meta = evaluate_applicability(
+        n_taxa=int(n_taxa),
+        gene_length_nt=int(gene_length_nt),
+        asset=asset,
+        extra_covariates=support_covars,
+    )
+    ctx = _build_feature_context(
+        eii_z_raw=float(eii_z_raw),
+        n_taxa=int(n_taxa),
+        gene_length_nt=int(gene_length_nt),
+        n_branches=n_branches,
+        q_emp=q_emp,
+        dispersion_ratio=dispersion_ratio,
+        sigma0_final=sigma0_final,
+        extra_covariates={**support_covars, **evidence_covars},
+    )
+
+    def _target_trace(target: str) -> Dict[str, Any]:
+        model_key = f"{target}_model"
+        model = asset.get(model_key)
+        out: Dict[str, Any] = {
+            "target": target,
+            "model_type": str(model.get("type", "")) if isinstance(model, Mapping) else "compat_isotonic",
+            "feature_names": [],
+            "feature_values": {},
+            "score": None,
+            "isotonic_input": None,
+            "isotonic_output": None,
+            "logistic_output": None,
+            "blended_output": None,
+        }
+
+        if isinstance(model, Mapping) and str(model.get("type", "")) == "linear_score_isotonic":
+            feature_names = [str(x) for x in model.get("feature_names", [])]
+            means = np.asarray(model.get("feature_mean", []), dtype=float)
+            scales = np.asarray(model.get("feature_scale", []), dtype=float)
+            if means.size != len(feature_names):
+                means = np.zeros(len(feature_names), dtype=float)
+            if scales.size != len(feature_names):
+                scales = np.ones(len(feature_names), dtype=float)
+            scales = np.where(np.abs(scales) > 1e-9, scales, 1.0)
+            feature_values: Dict[str, float] = {}
+            standardized_values: Dict[str, float] = {}
+            for i, key in enumerate(feature_names):
+                default = float(means[i]) if i < means.size and np.isfinite(means[i]) else 0.0
+                raw_v = _safe_float(ctx.get(key, default))
+                if raw_v is None:
+                    raw_v = default
+                feature_values[key] = float(raw_v)
+                standardized_values[key] = float((float(raw_v) - float(means[i])) / float(scales[i]))
+
+            score = _predict_linear_score(model, ctx)
+            iso_payload = model.get("isotonic_calibrator", {})
+            iso_out = (
+                float(predict_isotonic(iso_payload, [score])[0])
+                if isinstance(iso_payload, Mapping) and iso_payload.get("x") and iso_payload.get("y")
+                else None
+            )
+            logistic_out = None
+            blended = iso_out
+            logi = model.get("logistic_calibrator")
+            if isinstance(logi, Mapping):
+                logistic_out = _logistic_prob(
+                    float(logi.get("a", 0.0)),
+                    float(logi.get("b", 0.0)),
+                    score,
+                )
+                if iso_out is not None:
+                    w_iso = float(np.clip(float(model.get("blend_weight_isotonic", 0.5)), 0.0, 1.0))
+                    blended = float(np.clip(w_iso * iso_out + (1.0 - w_iso) * logistic_out, 0.0, 1.0))
+                else:
+                    blended = float(logistic_out)
+
+            out.update(
+                {
+                    "feature_names": feature_names,
+                    "feature_values": feature_values,
+                    "feature_values_standardized": standardized_values,
+                    "score": float(score),
+                    "isotonic_input": float(score),
+                    "isotonic_output": iso_out,
+                    "logistic_output": float(logistic_out) if logistic_out is not None else None,
+                    "blended_output": float(blended) if blended is not None else None,
+                    "isotonic_fit_source": model.get("isotonic_fit_source"),
+                    "score_design": model.get("score_design"),
+                }
+            )
+            return out
+
+        # Compatibility path: direct isotonic on EII_z.
+        p, lo, hi = _predict_target_probability(
+            target=target,
+            asset=asset,
+            eii_z_raw=float(eii_z_raw),
+            ctx=ctx,
+        )
+        out.update(
+            {
+                "feature_names": ["eii_z_raw"],
+                "feature_values": {"eii_z_raw": float(eii_z_raw)},
+                "score": float(eii_z_raw),
+                "isotonic_input": float(eii_z_raw),
+                "isotonic_output": float(p),
+                "logistic_output": None,
+                "blended_output": float(p),
+                "compatibility_prediction_ci": {"lower": float(lo), "upper": float(hi)},
+            }
+        )
+        return out
+
+    gene_trace = _target_trace("gene")
+    site_trace = _target_trace("site")
+    final = apply_ceii_calibration(
+        eii_z_raw=float(eii_z_raw),
+        n_taxa=int(n_taxa),
+        gene_length_nt=int(gene_length_nt),
+        n_branches=n_branches,
+        q_emp=q_emp,
+        dispersion_ratio=dispersion_ratio,
+        sigma0_final=sigma0_final,
+        extra_covariates=extra_covariates,
+        asset=asset,
+    )
+
+    evidence_feature_names = list(
+        dict.fromkeys(
+            [
+                *[str(x) for x in (asset.get("feature_set", {}) or {}).get("stage2_evidence_features", [])],
+                *[str(x) for x in gene_trace.get("feature_names", [])],
+                *[str(x) for x in site_trace.get("feature_names", [])],
+            ]
+        )
+    )
+    evidence_values = {}
+    for key in evidence_feature_names:
+        fv = _safe_float(ctx.get(key))
+        if fv is not None:
+            evidence_values[key] = float(fv)
+
+    return {
+        "applicability": {
+            **{k: v for k, v in applicability_meta.items() if k != "should_calibrate"},
+            "should_calibrate": bool(applicability_meta.get("should_calibrate", False)),
+            "support_features": {
+                "n_taxa": float(n_taxa),
+                "gene_length_nt": float(gene_length_nt),
+                **{k: float(v) for k, v in support_covars.items()},
+            },
+        },
+        "evidence": {
+            "values": evidence_values,
+            "raw_context": ctx,
+            "target_definition_profile": (
+                "v3_2"
+                if str(asset.get("calibration_version", "")).startswith("ceii_v3.2")
+                else ("v3_1" if str(asset.get("calibration_version", "")).startswith("ceii_v3.1") else "unknown")
+            ),
+            "target_definitions": asset.get("target_definitions", {}),
+        },
+        "gene_trace": gene_trace,
+        "site_trace": site_trace,
+        "final": final,
+    }
+
+
 __all__ = [
     "D_OBS_DEFINITION",
     "apply_ceii_calibration",
@@ -726,4 +946,5 @@ __all__ = [
     "load_calibration_asset",
     "predict_isotonic",
     "save_calibration_asset",
+    "trace_ceii_calibration",
 ]
